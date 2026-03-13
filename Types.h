@@ -17,7 +17,7 @@ struct Stick {
     int p2_idx; 
     float rest_length;
     ColorType type;
-    float width; // Used for rendering and energy calculations
+    float width; 
 };
 
 struct Gene {
@@ -35,10 +35,11 @@ struct OrganismRecord {
     
     float energy; float age; bool isAlive; bool markedForDeletion; 
     float sensorFoodDistance; float sensorHazardDistance;
+    float damageFlash = 0.0f; // Visual feedback for taking damage
+    bool hasShield = false;   // Track if purple sticks are present
 
     std::mutex orgMutex;
-
-    float reproCooldown = 5.0f; // Seconds between babies
+    float reproCooldown = 5.0f;
 
     OrganismRecord(int _id, Genome _dna, float _energy) 
         : id(_id), dna(_dna), energy(_energy), age(0.0f), isAlive(true), 

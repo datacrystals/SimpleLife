@@ -17,37 +17,61 @@ std::vector<float> carnivoreHistory;
 
 // main.cpp (Rendering Snippet)
 void renderWorld(const World& world) {
-    glLineWidth(3.0f); // Make the sticks visible
+    glLineWidth(3.0f);
     
     for (const auto* org : world.population) {
         if (org->points.empty()) continue;
 
-        // SINGLE draw call per organism!
         glBegin(GL_LINES); 
         for (const auto& stick : org->sticks) {
-            switch(stick.type) {
-                case ColorType::GREEN:  glColor3f(0.1f, 0.8f, 0.1f); break;
-                case ColorType::RED:    glColor3f(0.9f, 0.1f, 0.1f); break;
-                case ColorType::PURPLE: glColor3f(0.6f, 0.1f, 0.8f); break;
-                case ColorType::BLUE:   glColor3f(0.1f, 0.3f, 0.9f); break;
-                case ColorType::YELLOW: glColor3f(0.9f, 0.8f, 0.1f); break;
-                case ColorType::WHITE:  glColor3f(0.9f, 0.9f, 0.9f); break;
-                case ColorType::DEAD:   glColor3f(0.3f, 0.3f, 0.3f); break;
+            const Point& p1 = org->points[stick.p1_idx];
+            const Point& p2 = org->points[stick.p2_idx];
+
+            if (org->damageFlash > 0.0f) glColor3f(1.0f, 1.0f, 1.0f);
+            else {
+                switch(stick.type) {
+                    case ColorType::GREEN:  glColor3f(0.1f, 0.8f, 0.1f); break;
+                    case ColorType::RED:    glColor3f(0.9f, 0.1f, 0.1f); break;
+                    case ColorType::PURPLE: glColor3f(0.8f, 0.1f, 0.9f); break;
+                    case ColorType::BLUE:   glColor3f(0.1f, 0.3f, 0.9f); break;
+                    case ColorType::YELLOW: glColor3f(0.9f, 0.8f, 0.1f); break;
+                    case ColorType::WHITE:  glColor3f(0.9f, 0.9f, 0.9f); break;
+                    case ColorType::DEAD:   glColor3f(0.3f, 0.3f, 0.3f); break;
+                }
             }
 
-            glVertex2f(org->points[stick.p1_idx].x, org->points[stick.p1_idx].y);
-            glVertex2f(org->points[stick.p2_idx].x, org->points[stick.p2_idx].y);
+            float dx = p2.x - p1.x;
+            float dy = p2.y - p1.y;
+
+            // Check if the stick is wrapping
+            if (std::abs(dx) > WORLD_WIDTH * 0.5f || std::abs(dy) > WORLD_HEIGHT * 0.5f) {
+                // Draw two lines: one from p1 to the "ghost" p2, and p2 to the "ghost" p1
+                float g2x = p2.x, g2y = p2.y;
+                if (dx > WORLD_WIDTH * 0.5f) g2x -= WORLD_WIDTH;
+                else if (dx < -WORLD_WIDTH * 0.5f) g2x += WORLD_WIDTH;
+                if (dy > WORLD_HEIGHT * 0.5f) g2y -= WORLD_HEIGHT;
+                else if (dy < -WORLD_HEIGHT * 0.5f) g2y += WORLD_HEIGHT;
+
+                // Line 1: From p1 towards the edge
+                glVertex2f(p1.x, p1.y);
+                glVertex2f(g2x, g2y);
+
+                // Line 2: From p2 towards the other edge
+                float g1x = p1.x, g1y = p1.y;
+                if (dx > WORLD_WIDTH * 0.5f) g1x += WORLD_WIDTH;
+                else if (dx < -WORLD_WIDTH * 0.5f) g1x -= WORLD_WIDTH;
+                if (dy > WORLD_HEIGHT * 0.5f) g1y += WORLD_HEIGHT;
+                else if (dy < -WORLD_HEIGHT * 0.5f) g1y -= WORLD_HEIGHT;
+
+                glVertex2f(g1x, g1y);
+                glVertex2f(p2.x, p2.y);
+            } else {
+                // Normal case: no wrapping
+                glVertex2f(p1.x, p1.y);
+                glVertex2f(p2.x, p2.y);
+            }
         }
         glEnd();
-        
-        // // Optional: Draw the "joints" as points to make the skeleton clearer
-        // glPointSize(6.0f);
-        // glBegin(GL_POINTS);
-        // glColor3f(1.0f, 1.0f, 1.0f); 
-        // for (const auto& p : org->points) {
-        //     glVertex2f(p.x, p.y);
-        // }
-        // glEnd();
     }
 }
 
