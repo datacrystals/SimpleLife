@@ -1,4 +1,3 @@
-// Types.h
 #pragma once
 #include <vector>
 #include <cstdint>
@@ -26,7 +25,12 @@ struct Gene {
     int parentIndex; float branchAngle; 
 };
 
-typedef std::vector<Gene> Genome;
+// Replaced the vector typedef with a full Genome struct to hold new traits
+struct Genome {
+    std::vector<Gene> genes;
+    float lifespan = 40.0f;
+    int symmetry = 1; // 1 = none, 2 = 180 deg, 3 = 120 deg, etc.
+};
 
 struct OrganismRecord {
     int id; Genome dna; 

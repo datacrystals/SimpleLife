@@ -15,7 +15,6 @@ std::vector<float> plantHistory;
 std::vector<float> herbivoreHistory;
 std::vector<float> carnivoreHistory;
 
-// main.cpp (Rendering Snippet)
 void renderWorld(const World& world) {
     glLineWidth(3.0f);
     
@@ -45,18 +44,15 @@ void renderWorld(const World& world) {
 
             // Check if the stick is wrapping
             if (std::abs(dx) > WORLD_WIDTH * 0.5f || std::abs(dy) > WORLD_HEIGHT * 0.5f) {
-                // Draw two lines: one from p1 to the "ghost" p2, and p2 to the "ghost" p1
                 float g2x = p2.x, g2y = p2.y;
                 if (dx > WORLD_WIDTH * 0.5f) g2x -= WORLD_WIDTH;
                 else if (dx < -WORLD_WIDTH * 0.5f) g2x += WORLD_WIDTH;
                 if (dy > WORLD_HEIGHT * 0.5f) g2y -= WORLD_HEIGHT;
                 else if (dy < -WORLD_HEIGHT * 0.5f) g2y += WORLD_HEIGHT;
 
-                // Line 1: From p1 towards the edge
                 glVertex2f(p1.x, p1.y);
                 glVertex2f(g2x, g2y);
 
-                // Line 2: From p2 towards the other edge
                 float g1x = p1.x, g1y = p1.y;
                 if (dx > WORLD_WIDTH * 0.5f) g1x += WORLD_WIDTH;
                 else if (dx < -WORLD_WIDTH * 0.5f) g1x -= WORLD_WIDTH;
@@ -66,7 +62,6 @@ void renderWorld(const World& world) {
                 glVertex2f(g1x, g1y);
                 glVertex2f(p2.x, p2.y);
             } else {
-                // Normal case: no wrapping
                 glVertex2f(p1.x, p1.y);
                 glVertex2f(p2.x, p2.y);
             }
@@ -104,13 +99,23 @@ int main() {
         ImGui::NewFrame();
 
         int plants = 0, herbivores = 0, carnivores = 0;
+        float avgSym = 0.0f, avgLife = 0.0f;
+        int aliveCount = 0;
+
         for(auto* org : world.population) {
-            // CHANGED: Look for sticks instead of segments, and use dot notation
             if(!org->sticks.empty() && org->isAlive) {
+                avgSym += org->dna.symmetry;
+                avgLife += org->dna.lifespan;
+                aliveCount++;
                 if(org->sticks[0].type == ColorType::GREEN) plants++;
                 else if(org->sticks[0].type == ColorType::WHITE) herbivores++;
                 else if(org->sticks[0].type == ColorType::RED) carnivores++;
             }
+        }
+
+        if (aliveCount > 0) {
+            avgSym /= aliveCount;
+            avgLife /= aliveCount;
         }
 
         if(frameCounter++ % 10 == 0) {
@@ -127,10 +132,12 @@ int main() {
         ImGui::Text("Active Cores: %d", std::thread::hardware_concurrency());
         
         ImGui::Separator();
-        ImGui::Text("Demographics");
+        ImGui::Text("Demographics & Traits");
         ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Plants: %d", plants);
         ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.9f, 1.0f), "Herbivores: %d", herbivores);
         ImGui::TextColored(ImVec4(0.9f, 0.2f, 0.2f, 1.0f), "Carnivores: %d", carnivores);
+        ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "Avg Symmetry: %.2f", avgSym);
+        ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "Avg Lifespan: %.1f", avgLife);
         
         ImGui::PlotLines("Total", popHistory.data(), popHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
         ImGui::PlotLines("Plants", plantHistory.data(), plantHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
@@ -148,10 +155,16 @@ int main() {
         ImGui::Text("Physical Forces");
         ImGui::SliderFloat("Thrust Power", &world.thrustMultiplier, 10.0f, 200.0f);
         ImGui::SliderFloat("Turn Power", &world.turnMultiplier, 5.0f, 100.0f);
+
+
+        ImGui::Separator();
+        ImGui::Text("Component Rules");
+        ImGui::SliderFloat("Damage Amount", &world.damageAmount, 10.0f, 200.0f);
+        ImGui::SliderFloat("Shield Cost", &world.shieldCost, 0.0f, 2.0f);
+        ImGui::SliderFloat("Shield Efficiency", &world.shieldEfficiency, 0.0f, 1.0f);
         
         ImGui::Separator();
         ImGui::Text("Camera Controls: W, A, S, D, Q (Zoom In), E (Zoom Out)");
-
 
         if (ImGui::Button("Reset World", ImVec2(150.0f, 40.0f))) {
             world.initEden();
