@@ -13,15 +13,15 @@
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Body/BodyLock.h>
-#include <Jolt/Physics/Body/BodyLockMulti.h> // FIX: Included this for BodyLockMultiWrite
+#include <Jolt/Physics/Body/BodyLockMulti.h> 
+#include <Jolt/Physics/Collision/GroupFilter.h> // NEW: For ignoring self-collisions
 #include <iostream>
 #include <mutex>
-#include <unordered_map> // FIX: Included for joint tracking
+#include <unordered_map> 
 #include <vector>
 
 using namespace JPH;
 
-// Jolt requires broad-phase layers. We'll use 0 for moving, 1 for static (food).
 namespace Layers {
     static constexpr ObjectLayer MOVING = 0;
     static constexpr ObjectLayer STATIC = 1;
@@ -53,7 +53,15 @@ public:
     virtual bool ShouldCollide(ObjectLayer inLayer1, ObjectLayer inLayer2) const override { return true; }
 };
 
-// Thread-safe eating!
+// NEW: A custom filter to tell Jolt to ignore collisions between limbs of the same organism!
+class BiologyGroupFilter : public GroupFilter {
+public:
+    virtual bool CanCollide(const CollisionGroup &inGroup1, const CollisionGroup &inGroup2) const override {
+        // If they share the same organism ID, they phase through each other.
+        return inGroup1.GetGroupID() != inGroup2.GetGroupID();
+    }
+};
+
 class BiologyContactListener : public ContactListener {
     std::mutex eatingMutex;
 public:
@@ -64,17 +72,24 @@ public:
 
         std::lock_guard<std::mutex> lock(eatingMutex);
         
-        // Instant Eating (Food)
-        if (segA->type != ColorType::GREEN && segB->type == ColorType::GREEN) {
-            segA->parentOrg->energy += 40.0f; segB->parentOrg->markedForDeletion = true;
-        } else if (segB->type != ColorType::GREEN && segA->type == ColorType::GREEN) {
-            segB->parentOrg->energy += 40.0f; segA->parentOrg->markedForDeletion = true;
-        }
+        auto tryEatPlant = [](Segment* eater, Segment* food) {
+            if (eater->type == ColorType::WHITE && food->type == ColorType::GREEN && food->parentOrg->isAlive) {
+                eater->parentOrg->energy += 120.0f; 
+                food->parentOrg->markedForDeletion = true; 
+                food->parentOrg->isAlive = false;
+            }
+        };
+        tryEatPlant(segA, segB);
+        tryEatPlant(segB, segA);
         
-        // Combat
-        if (segA->type == ColorType::RED && segB->parentOrg->isAlive && segB->type != ColorType::RED) {
-            segB->parentOrg->energy -= 25.0f; segA->parentOrg->energy += 25.0f;
-        }
+        auto tryAttack = [](Segment* attacker, Segment* victim) {
+            if (attacker->type == ColorType::RED && victim->type != ColorType::RED && victim->parentOrg->isAlive) {
+                victim->parentOrg->energy -= 60.0f; 
+                attacker->parentOrg->energy += 40.0f; 
+            }
+        };
+        tryAttack(segA, segB);
+        tryAttack(segB, segA);
     }
 };
 
@@ -87,8 +102,9 @@ public:
     ObjectLayerPairFilterImpl objectVsObjectLayerFilter;
     PhysicsSystem* physicsSystem;
     BiologyContactListener contactListener;
+    
+    Ref<GroupFilter> bioGroupFilter; // Stores our self-collision rules
 
-    // Safely tracks the reference-counted joints for each organism
     std::unordered_map<int, std::vector<Ref<Constraint>>> orgJoints;
 
     JoltWrapper() {
@@ -96,13 +112,16 @@ public:
         Factory::sInstance = new Factory();
         RegisterTypes();
 
-        tempAllocator = new TempAllocatorImpl(10 * 1024 * 1024);
+        tempAllocator = new TempAllocatorImpl(1024 * 1024 * 1024);
         jobSystem = new JobSystemThreadPool(cMaxPhysicsJobs, cMaxPhysicsBarriers, thread::hardware_concurrency() - 1);
 
         physicsSystem = new PhysicsSystem();
-        physicsSystem->Init(10240, 0, 10240, 10240, broadPhaseLayerInterface, objectVsBroadphaseLayerFilter, objectVsObjectLayerFilter);
+        physicsSystem->Init(65536, 0, 65536, 65536, broadPhaseLayerInterface, objectVsBroadphaseLayerFilter, objectVsObjectLayerFilter);
         physicsSystem->SetGravity(Vec3(0, 0, 0));
         physicsSystem->SetContactListener(&contactListener);
+        
+        // Initialize our custom group filter
+        bioGroupFilter = new BiologyGroupFilter();
     }
 
     ~JoltWrapper() {
@@ -119,21 +138,24 @@ public:
 
     uint32_t createSegment(float x, float y, float w, float h, ColorType type, Segment* userData, int orgID) {
         BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+        
+        // FIX: Reverted back to heap allocation. Jolt's internal RefConst smart pointer 
+        // takes ownership of this and safely deletes it when 'settings' goes out of scope.
         BoxShapeSettings* shapeSettings = new BoxShapeSettings(Vec3(w/2.0f, h/2.0f, 0.5f));
                 
-        BodyCreationSettings settings(shapeSettings, RVec3(x, y, 0), Quat::sIdentity(), 
-            (type == ColorType::GREEN) ? EMotionType::Static : EMotionType::Dynamic, 
-            (type == ColorType::GREEN) ? Layers::STATIC : Layers::MOVING);
+        BodyCreationSettings settings(shapeSettings, RVec3(x, y, 0), Quat::sIdentity(), EMotionType::Dynamic, Layers::MOVING);
             
-        settings.mLinearDamping = 1.0f; 
-        settings.mAngularDamping = 2.0f;
+        settings.mLinearDamping = 3.0f; 
+        settings.mAngularDamping = 5.0f;
         settings.mUserData = reinterpret_cast<uint64_t>(userData);
+        
+        // This is the real fix from last time: prevents limbs from exploding each other
+        settings.mCollisionGroup.SetGroupFilter(bioGroupFilter);
         settings.mCollisionGroup.SetGroupID(orgID); 
         
         settings.mOverrideMassProperties = EOverrideMassProperties::CalculateInertia;
         settings.mMassPropertiesOverride.mMass = 1.0f;
         
-        // Lock Z axis and 3D rotations!
         settings.mAllowedDOFs = EAllowedDOFs::TranslationX | EAllowedDOFs::TranslationY | EAllowedDOFs::RotationZ;
 
         Body* body = bodyInterface.CreateBody(settings);
@@ -141,12 +163,10 @@ public:
         return body->GetID().GetIndexAndSequenceNumber();
     }
 
-    // Safe Locking & Memory Management for Muscles
     void createMuscle(int orgID, uint32_t idA, uint32_t idB, float anchorX, float anchorY) {
         BodyID bA(idA), bB(idB);
         BodyID ids[2] = { bA, bB };
         
-        // JPH::BodyLockMultiWrite automatically sorts locks and deduplicates mutexes to prevent deadlocks!
         BodyLockMultiWrite locks(physicsSystem->GetBodyLockInterface(), ids, 2);
         
         Body* bodyA = locks.GetBody(0);
@@ -158,18 +178,13 @@ public:
             hinge.mHingeAxis1 = hinge.mHingeAxis2 = Vec3(0, 0, 1);
             hinge.mNormalAxis1 = hinge.mNormalAxis2 = Vec3(1, 0, 0);
             
-            // By assigning to Ref<Constraint>, the memory won't be instantly deleted!
             Ref<Constraint> constraint = hinge.Create(*bodyA, *bodyB);
             physicsSystem->AddConstraint(constraint);
-            
-            // Store it so we can safely delete it when the organism dies
             orgJoints[orgID].push_back(constraint);
         }
     }
 
-    // A safe way to delete an organism's physical presence
     void cleanupOrganism(int orgID, const std::vector<uint32_t>& bodyIDs) {
-        // Must remove constraints BEFORE removing the bodies they are attached to!
         auto it = orgJoints.find(orgID);
         if (it != orgJoints.end()) {
             for (auto& constraint : it->second) {
@@ -178,7 +193,6 @@ public:
             orgJoints.erase(it);
         }
         
-        // Now safely remove and destroy the bodies
         for (uint32_t id : bodyIDs) {
             physicsSystem->GetBodyInterface().RemoveBody(BodyID(id));
             physicsSystem->GetBodyInterface().DestroyBody(BodyID(id));
@@ -190,7 +204,7 @@ public:
         BodyID bID(id);
         if(!bi.IsAdded(bID)) return;
         Quat rot = bi.GetRotation(bID);
-        Vec3 forward = rot * Vec3(0, 1, 0); // Jolt Y is up
+        Vec3 forward = rot * Vec3(0, 1, 0); 
         bi.AddForce(bID, forward * force);
     }
 
@@ -198,8 +212,6 @@ public:
         BodyInterface& bi = physicsSystem->GetBodyInterface();
         BodyID bID(id);
         if(!bi.IsAdded(bID)) return;
-        
-        // Jolt is right-handed. Rotating around the Z-axis turns the object on the 2D XY plane.
         bi.AddTorque(bID, Vec3(0, 0, torque));
     }
 };

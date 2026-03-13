@@ -83,6 +83,9 @@ int main() {
         ImGui::Text("Physical Forces");
         ImGui::SliderFloat("Thrust Power", &world.thrustMultiplier, 10.0f, 200.0f);
         ImGui::SliderFloat("Turn Power", &world.turnMultiplier, 5.0f, 100.0f);
+
+
+
         ImGui::End();
 
         world.updateTick();
