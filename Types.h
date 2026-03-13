@@ -17,19 +17,26 @@ struct Stick {
     float rest_length;
     ColorType type;
     float width; 
+
+    bool isHidden = false;      // Don't render invisible structural braces
+    bool isMotorized = false;   // Can this stick actively flex its joint?
+    float base_length = 0.0f;   // Default resting length for motorized recovery
+    float flex_range = 0.0f;    // Max distance the joint brace can contract/expand
+    int brace_idx = -1;         // Reference to an invisible brace supporting this joint
+    int gene_idx = -1;          // Which gene created this stick
 };
 
 struct Gene {
     ColorType type; float length; float param1; float param2; 
     float weight_FoodSensor; float weight_HazardSensor; float bias;
     int parentIndex; float branchAngle; 
+    bool isMotorized; // Determines if the joint bends using neural signals
 };
 
-// Replaced the vector typedef with a full Genome struct to hold new traits
 struct Genome {
     std::vector<Gene> genes;
     float lifespan = 40.0f;
-    int symmetry = 1; // 1 = none, 2 = 180 deg, 3 = 120 deg, etc.
+    int symmetry = 1; 
 };
 
 struct OrganismRecord {

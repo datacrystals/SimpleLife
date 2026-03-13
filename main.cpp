@@ -3,7 +3,9 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include "World.h"
+#include "Types.h"
 #include <vector>
+#include <thread>
 
 std::mt19937 rng(42);
 std::uniform_real_distribution<float> randFloat(0.0f, 1.0f);
@@ -23,6 +25,8 @@ void renderWorld(const World& world) {
 
         glBegin(GL_LINES); 
         for (const auto& stick : org->sticks) {
+            if (stick.isHidden) continue; // Don't render invisible rigid braces
+
             const Point& p1 = org->points[stick.p1_idx];
             const Point& p2 = org->points[stick.p2_idx];
 
@@ -43,21 +47,21 @@ void renderWorld(const World& world) {
             float dy = p2.y - p1.y;
 
             // Check if the stick is wrapping
-            if (std::abs(dx) > WORLD_WIDTH * 0.5f || std::abs(dy) > WORLD_HEIGHT * 0.5f) {
+            if (std::abs(dx) > world.WORLD_WIDTH * 0.5f || std::abs(dy) > world.WORLD_HEIGHT * 0.5f) {
                 float g2x = p2.x, g2y = p2.y;
-                if (dx > WORLD_WIDTH * 0.5f) g2x -= WORLD_WIDTH;
-                else if (dx < -WORLD_WIDTH * 0.5f) g2x += WORLD_WIDTH;
-                if (dy > WORLD_HEIGHT * 0.5f) g2y -= WORLD_HEIGHT;
-                else if (dy < -WORLD_HEIGHT * 0.5f) g2y += WORLD_HEIGHT;
+                if (dx > world.WORLD_WIDTH * 0.5f) g2x -=world.WORLD_WIDTH;
+                else if (dx < -world.WORLD_WIDTH * 0.5f) g2x += world.WORLD_WIDTH;
+                if (dy > world.WORLD_HEIGHT * 0.5f) g2y -= world.WORLD_HEIGHT;
+                else if (dy < -world.WORLD_HEIGHT * 0.5f) g2y += world.WORLD_HEIGHT;
 
                 glVertex2f(p1.x, p1.y);
                 glVertex2f(g2x, g2y);
 
                 float g1x = p1.x, g1y = p1.y;
-                if (dx > WORLD_WIDTH * 0.5f) g1x += WORLD_WIDTH;
-                else if (dx < -WORLD_WIDTH * 0.5f) g1x -= WORLD_WIDTH;
-                if (dy > WORLD_HEIGHT * 0.5f) g1y += WORLD_HEIGHT;
-                else if (dy < -WORLD_HEIGHT * 0.5f) g1y -= WORLD_HEIGHT;
+                if (dx > world.WORLD_WIDTH * 0.5f) g1x += world.WORLD_WIDTH;
+                else if (dx < -world.WORLD_WIDTH * 0.5f) g1x -= world.WORLD_WIDTH;
+                if (dy > world.WORLD_HEIGHT * 0.5f) g1y += world.WORLD_HEIGHT;
+                else if (dy < -world.WORLD_HEIGHT * 0.5f) g1y -= world.WORLD_HEIGHT;
 
                 glVertex2f(g1x, g1y);
                 glVertex2f(p2.x, p2.y);
@@ -153,16 +157,19 @@ int main() {
         
         ImGui::Separator();
         ImGui::Text("Physical Forces");
-        ImGui::SliderFloat("Thrust Power", &world.thrustMultiplier, 10.0f, 200.0f);
-        ImGui::SliderFloat("Turn Power", &world.turnMultiplier, 5.0f, 100.0f);
-
-
+        ImGui::SliderFloat("Thrust Power", &world.thrustMultiplier, 0.0f, 2.0f);
+        ImGui::SliderFloat("Turn Power", &world.turnMultiplier, 0.0f, 1.0f);
+        ImGui::SliderFloat("World X", &world.WORLD_WIDTH, 50.0f, 1000.0f);
+        ImGui::SliderFloat("World Y", &world.WORLD_HEIGHT, 50.0f, 1000.0f);
+        
+        
         ImGui::Separator();
         ImGui::Text("Component Rules");
         ImGui::SliderFloat("Damage Amount", &world.damageAmount, 10.0f, 200.0f);
         ImGui::SliderFloat("Shield Cost", &world.shieldCost, 0.0f, 2.0f);
         ImGui::SliderFloat("Shield Efficiency", &world.shieldEfficiency, 0.0f, 1.0f);
         
+
         ImGui::Separator();
         ImGui::Text("Camera Controls: W, A, S, D, Q (Zoom In), E (Zoom Out)");
 
