@@ -26,7 +26,7 @@ set(IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
-add_executable(garden main.cpp ${IMGUI_SOURCES})
+add_executable(garden main.cpp PhysicsEngine.cpp Brain.cpp ${IMGUI_SOURCES})
 
 target_include_directories(garden PRIVATE 
     ${imgui_SOURCE_DIR} 
