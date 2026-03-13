@@ -8,19 +8,24 @@
 std::mt19937 rng(42);
 std::uniform_real_distribution<float> randFloat(0.0f, 1.0f);
 
-float camX = 0.0f, camY = 0.0f, camZoom = 350.0f, aspect = 1.0f;
+float camX = 0.0f, camY = 0.0f, camZoom = 100.0f, aspect = 1.0f;
 
 std::vector<float> popHistory;
 std::vector<float> plantHistory;
 std::vector<float> herbivoreHistory;
 std::vector<float> carnivoreHistory;
 
-void renderWorld(World& world) {
-    // MASSIVE PERFORMANCE BOOST: Only 1 Draw Call for the entire universe!
-    glBegin(GL_QUADS);
+// main.cpp (Rendering Snippet)
+void renderWorld(const World& world) {
+    glLineWidth(3.0f); // Make the sticks visible
+    
     for (const auto* org : world.population) {
-        for (const auto* seg : org->segments) {
-            switch(seg->type) {
+        if (org->points.empty()) continue;
+
+        // SINGLE draw call per organism!
+        glBegin(GL_LINES); 
+        for (const auto& stick : org->sticks) {
+            switch(stick.type) {
                 case ColorType::GREEN:  glColor3f(0.1f, 0.8f, 0.1f); break;
                 case ColorType::RED:    glColor3f(0.9f, 0.1f, 0.1f); break;
                 case ColorType::PURPLE: glColor3f(0.6f, 0.1f, 0.8f); break;
@@ -30,14 +35,20 @@ void renderWorld(World& world) {
                 case ColorType::DEAD:   glColor3f(0.3f, 0.3f, 0.3f); break;
             }
 
-            // Dump the parallel-calculated corners directly to the GPU
-            glVertex2f(seg->vX[0], seg->vY[0]);
-            glVertex2f(seg->vX[1], seg->vY[1]);
-            glVertex2f(seg->vX[2], seg->vY[2]);
-            glVertex2f(seg->vX[3], seg->vY[3]);
+            glVertex2f(org->points[stick.p1_idx].x, org->points[stick.p1_idx].y);
+            glVertex2f(org->points[stick.p2_idx].x, org->points[stick.p2_idx].y);
         }
+        glEnd();
+        
+        // // Optional: Draw the "joints" as points to make the skeleton clearer
+        // glPointSize(6.0f);
+        // glBegin(GL_POINTS);
+        // glColor3f(1.0f, 1.0f, 1.0f); 
+        // for (const auto& p : org->points) {
+        //     glVertex2f(p.x, p.y);
+        // }
+        // glEnd();
     }
-    glEnd();
 }
 
 int main() {
@@ -70,13 +81,14 @@ int main() {
 
         int plants = 0, herbivores = 0, carnivores = 0;
         for(auto* org : world.population) {
-            if(!org->segments.empty() && org->isAlive) {
-                if(org->segments[0]->type == ColorType::GREEN) plants++;
-                else if(org->segments[0]->type == ColorType::WHITE) herbivores++;
-                else if(org->segments[0]->type == ColorType::RED) carnivores++;
+            // CHANGED: Look for sticks instead of segments, and use dot notation
+            if(!org->sticks.empty() && org->isAlive) {
+                if(org->sticks[0].type == ColorType::GREEN) plants++;
+                else if(org->sticks[0].type == ColorType::WHITE) herbivores++;
+                else if(org->sticks[0].type == ColorType::RED) carnivores++;
             }
         }
-        
+
         if(frameCounter++ % 10 == 0) {
             popHistory.erase(popHistory.begin()); popHistory.push_back((float)world.population.size());
             plantHistory.erase(plantHistory.begin()); plantHistory.push_back((float)plants);
@@ -115,6 +127,12 @@ int main() {
         
         ImGui::Separator();
         ImGui::Text("Camera Controls: W, A, S, D, Q (Zoom In), E (Zoom Out)");
+
+
+        if (ImGui::Button("Reset World", ImVec2(150.0f, 40.0f))) {
+            world.initEden();
+        }
+
         ImGui::End();
 
         if (ImGui::IsKeyDown(ImGuiKey_W)) camY += camZoom * 0.03f;

@@ -1,23 +1,23 @@
+// Types.h
 #pragma once
 #include <vector>
 #include <cstdint>
-#include <mutex> 
+#include <mutex>
 
-namespace JPH { class BodyID; }
 enum class ColorType { GREEN, RED, PURPLE, BLUE, YELLOW, WHITE, DEAD };
 
-struct OrganismRecord;
+struct Point {
+    float x, y;
+    float old_x, old_y;
+    float ax, ay; 
+};
 
-struct Segment {
+struct Stick {
+    int p1_idx; 
+    int p2_idx; 
+    float rest_length;
     ColorType type;
-    uint32_t joltBodyID; 
-    float width, height;
-    OrganismRecord* parentOrg; 
-    
-    // NEW: Multithreaded Render Vertices
-    // We will use the 64 cores to calculate exactly where the corners are!
-    float vX[4] = {0,0,0,0};
-    float vY[4] = {0,0,0,0};
+    float width; // Used for rendering and energy calculations
 };
 
 struct Gene {
@@ -29,11 +29,16 @@ struct Gene {
 typedef std::vector<Gene> Genome;
 
 struct OrganismRecord {
-    int id; Genome dna; std::vector<Segment*> segments; std::vector<uint32_t> muscleJointIDs; 
+    int id; Genome dna; 
+    std::vector<Point> points;
+    std::vector<Stick> sticks;
+    
     float energy; float age; bool isAlive; bool markedForDeletion; 
     float sensorFoodDistance; float sensorHazardDistance;
 
     std::mutex orgMutex;
+
+    float reproCooldown = 5.0f; // Seconds between babies
 
     OrganismRecord(int _id, Genome _dna, float _energy) 
         : id(_id), dna(_dna), energy(_energy), age(0.0f), isAlive(true), 
