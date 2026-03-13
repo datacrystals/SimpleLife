@@ -1,13 +1,12 @@
+#pragma once
+#include "Types.h"
+#include <execution>
 #include <random>
 #include <vector>
 #include <unordered_map>
 #include <mutex>
 #include <cmath>
 #include <algorithm>
-#include <execution>
-
-#include "Types.h"
-
 
 extern std::mt19937 rng;
 extern std::uniform_real_distribution<float> randFloat;
@@ -26,22 +25,49 @@ public:
     
     float timeScale = 1.0f;          
     int maxPopulation = 2000;       
-    
+
     float WORLD_WIDTH = 200.0f;
     float WORLD_HEIGHT = 140.0f;
-
-    // Evolution & Balance Parameters
+    
+    // --- Evolution & Balance Parameters ---
     float mutationRate = 0.05f;      
-    float baseMetabolism = 0.1f;
-    float photosynthesisRate = 1.0f; 
-    float movementCost = 0.004f;
-    float thrustMultiplier = 0.5f;
-    float turnMultiplier = 0.03f;
+    float mutChanceType = 0.2f;        // Chance to change segment color
+    float mutChanceMotor = 0.2f;       // Chance to toggle joint rigidity/flexibility
+    float mutChanceAddNode = 0.5f;     // Base chance modifier to grow a new segment
+    
+    int minSymmetry = 1;
+    int maxSymmetry = 6;
+    float minLifespan = 10.0f;
+    float maxLifespan = 100.0f;
 
-    // Shield & Combat Balance
-    float shieldEfficiency = 0.7f; 
-    float shieldCost = 0.05f;      
-    float damageAmount = 150.0f;    
+    float baseMetabolism = 0.1f;
+    float segmentCost = 0.02f;       
+    float sizeDiscount = 0.01f;      
+
+    // --- Segment Specific Parameters ---
+    // GREEN (Plant)
+    float photosynthesisRate = 1.0f; 
+    float shadePenalty = 0.5f;       
+    float greenCrowdRadius = 5.0f;   // How close segments must be to shade each other
+
+    // WHITE (Herbivore)
+    float herbivoreEatEnergy = 150.0f; // How much energy gained from eating a plant
+    float herbivoreAttackRange = 2.0f; 
+
+    // RED (Carnivore)
+    float damageAmount = 80.0f;      // DPS
+    float carnivoreEfficiency = 0.8f;  // Percentage of damage converted to energy
+    float carnivoreAttackRange = 2.0f; 
+
+    // PURPLE (Shield)
+    float shieldEfficiency = 0.7f;     // % of red damage blocked
+    float shieldCost = 0.05f;          // Upkeep cost of having armor
+
+    // YELLOW & BLUE (Movement)
+    float movementCost = 0.004f;
+    float thrustMultiplier = 0.5f;     // YELLOW thrust power
+    float turnMultiplier = 0.03f;      // BLUE torque power
+
 
     World() { initEden(); }
 
@@ -58,8 +84,8 @@ public:
         Genome child = parentDna;
         for (auto& gene : child.genes) {
             if (randFloat(rng) < mutationRate) { 
-                if (randFloat(rng) < 0.2f) gene.type = static_cast<ColorType>(rand() % 6);
-                if (randFloat(rng) < 0.2f) gene.isMotorized = !gene.isMotorized; // Toggle joint flexibility
+                if (randFloat(rng) < mutChanceType) gene.type = static_cast<ColorType>(rand() % 6);
+                if (randFloat(rng) < mutChanceMotor) gene.isMotorized = !gene.isMotorized; 
                 gene.length += (randFloat(rng) - 0.5f) * 0.5f; 
                 gene.param1 += (randFloat(rng) - 0.5f) * 5.0f; 
                 gene.param2 += (randFloat(rng) - 0.5f) * 5.0f; 
@@ -69,7 +95,8 @@ public:
                 if (gene.length < 0.2f) gene.length = 0.2f; 
             }
         }
-        if (randFloat(rng) < (mutationRate / 2.0f) && child.genes.size() < 10) {
+        
+        if (randFloat(rng) < (mutationRate * mutChanceAddNode) && child.genes.size() < 10) {
             ColorType newType = static_cast<ColorType>(rand() % 6);
             int attachIdx = rand() % child.genes.size(); 
             bool isMotor = randFloat(rng) > 0.5f;
@@ -79,15 +106,15 @@ public:
         // Mutate Lifespan
         if (randFloat(rng) < mutationRate) {
             child.lifespan += (randFloat(rng) - 0.5f) * 20.0f;
-            if (child.lifespan < 10.0f) child.lifespan = 10.0f;
-            if (child.lifespan > 100.0f) child.lifespan = 100.0f;
+            if (child.lifespan < minLifespan) child.lifespan = minLifespan;
+            if (child.lifespan > maxLifespan) child.lifespan = maxLifespan;
         }
 
         // Mutate Symmetry
         if (randFloat(rng) < mutationRate * 0.5f) {
             child.symmetry += (rand() % 3) - 1; // -1, 0, or +1
-            if (child.symmetry < 1) child.symmetry = 1;
-            if (child.symmetry > 32) child.symmetry = 32;
+            if (child.symmetry < minSymmetry) child.symmetry = minSymmetry;
+            if (child.symmetry > maxSymmetry) child.symmetry = maxSymmetry;
         }
         return child;
     }
@@ -117,7 +144,6 @@ public:
             
             Stick s = {pIdx, newPIdx, g.length, g.type, 1.0f, false, g.isMotorized, g.length, 0.0f, -1, (int)i};
             
-            // Generate Structural Brace to lock joint
             if (g.parentIndex >= 0 && g.parentIndex < (int)i) {
                 int grandP = gene_p1[g.parentIndex];
                 if (grandP != newPIdx) { 
@@ -125,10 +151,9 @@ public:
                     float dy = org->points[grandP].y - newY;
                     float dist = std::sqrt(dx*dx + dy*dy);
                     
-                    // The hidden structural brace keeps it rigid. If motorized, we bend this brace!
                     Stick brace = {grandP, newPIdx, dist, ColorType::DEAD, 1.0f, true, false, dist, dist * 0.4f, -1, (int)i};
                     
-                    s.brace_idx = arm0_sticks.size() + 1; // It will be the next element pushed
+                    s.brace_idx = arm0_sticks.size() + 1; 
                     arm0_sticks.push_back(s);
                     arm0_sticks.push_back(brace);
                 } else {
@@ -139,7 +164,6 @@ public:
             }
         }
 
-        // Add arm0 to org->sticks, resolving brace offsets
         int base_stick_idx = org->sticks.size();
         for(auto& st : arm0_sticks) {
             Stick copySt = st;
@@ -147,7 +171,7 @@ public:
             org->sticks.push_back(copySt);
         }
 
-        // Apply Symmetry (Duplicate and rotate)
+        // Apply Symmetry
         if (dna.symmetry > 1) {
             int symCount = std::min(dna.symmetry, 8); 
             float angleStep = (2.0f * 3.14159265f) / symCount;
@@ -158,9 +182,8 @@ public:
                 float sinT = std::sin(theta);
                 
                 std::unordered_map<int, int> pointMap;
-                pointMap[0] = 0; // Root point is shared
+                pointMap[0] = 0; 
                 
-                // Collect unique points used by arm0
                 std::vector<int> unique_points;
                 for(auto& st : arm0_sticks) {
                     if (st.p1_idx != 0 && pointMap.find(st.p1_idx) == pointMap.end()) { unique_points.push_back(st.p1_idx); pointMap[st.p1_idx] = -1; }
@@ -178,7 +201,6 @@ public:
                     pointMap[oldIdx] = org->points.size() - 1;
                 }
                 
-                // Duplicate connections
                 int new_base_stick_idx = org->sticks.size();
                 for (const Stick& st : arm0_sticks) {
                     Stick symSt = st;
@@ -219,7 +241,6 @@ public:
         if (dt <= 0.0f) return;
         worldTime += dt;
     
-        // 1. Build Spatial Hash Grid
         std::unordered_map<int, std::vector<OrganismRecord*>> spatialGrid;
         for (auto* org : population) {
             if (org->isAlive && !org->points.empty()) {
@@ -227,7 +248,10 @@ public:
             }
         }
     
-        // 2. Main Parallel Simulation Loop
+        float crowdSq = greenCrowdRadius * greenCrowdRadius;
+        float carnivoreAtkSq = carnivoreAttackRange * carnivoreAttackRange;
+        float herbivoreAtkSq = herbivoreAttackRange * herbivoreAttackRange;
+
         std::for_each(std::execution::par_unseq, population.begin(), population.end(), [&](OrganismRecord* org) {
             if (org->markedForDeletion) return; 
     
@@ -238,14 +262,29 @@ public:
                 org->age += dt;
                 if (org->reproCooldown > 0) org->reproCooldown -= dt;
                 if (org->damageFlash > 0) org->damageFlash -= dt;
-                if (org->age > org->dna.lifespan) org->energy = 0; // Natural Death
+                if (org->age > org->dna.lifespan) org->energy = 0; 
     
                 float netEnergy = 0.0f;
                 org->sensorFoodDistance = 1.0f; 
                 org->sensorHazardDistance = 1.0f;
                 org->hasShield = false;
 
-                // --- Wrapped Proximity Checks ---
+                // Pre-calculate self-shading
+                std::vector<float> stickShade(org->sticks.size(), 0.0f);
+                for (size_t i = 0; i < org->sticks.size(); ++i) {
+                    if (org->sticks[i].isHidden || org->sticks[i].type != ColorType::GREEN) continue;
+                    for (size_t j = i + 1; j < org->sticks.size(); ++j) {
+                        if (org->sticks[j].isHidden || org->sticks[j].type != ColorType::GREEN) continue;
+                        float px, py;
+                        getToroidalDiff(org->points[org->sticks[j].p1_idx].x, org->points[org->sticks[j].p1_idx].y, 
+                                        org->points[org->sticks[i].p1_idx].x, org->points[org->sticks[i].p1_idx].y, px, py);
+                        if (px*px + py*py < crowdSq) { 
+                            stickShade[i] += 1.0f;
+                            stickShade[j] += 1.0f;
+                        }
+                    }
+                }
+
                 int curGx = (int)std::floor(org->points[0].x / SPATIAL_GRID_SIZE);
                 int curGy = (int)std::floor(org->points[0].y / SPATIAL_GRID_SIZE);
                 int gridCols = (int)std::ceil(WORLD_WIDTH / SPATIAL_GRID_SIZE);
@@ -267,7 +306,6 @@ public:
                                 float dist = std::sqrt(distSq);
                                 
                                 if (dist < 20.0f) { 
-                                    // 1. Vision Sensors (Skip hidden braces for sensory checks)
                                     if (!other->sticks[0].isHidden) {
                                         if (other->sticks[0].type == ColorType::GREEN) 
                                             org->sensorFoodDistance = std::min(org->sensorFoodDistance, dist / 20.0f);
@@ -275,7 +313,6 @@ public:
                                             org->sensorHazardDistance = std::min(org->sensorHazardDistance, dist / 20.0f);
                                     }
 
-                                    // 2. Physical Point-to-Point Pushing
                                     float pushRadius = 1.2f; 
                                     float pushRadiusSq = pushRadius * pushRadius;
                                     for (size_t i = 0; i < org->points.size(); ++i) {
@@ -287,7 +324,7 @@ public:
                                             if (pDistSq > 0.0001f && pDistSq < pushRadiusSq) {
                                                 float pDist = std::sqrt(pDistSq);
                                                 float overlap = pushRadius - pDist;
-                                                float force = overlap * 150.0f; // Soft-body spring repulsion
+                                                float force = overlap * 150.0f; 
                                                 float fx = (px / pDist) * force;
                                                 float fy = (py / pDist) * force;
                                                 
@@ -300,7 +337,7 @@ public:
                                         }
                                     }
 
-                                    // 3. Combat Damage & Eating
+                                    // Combat Damage & Eating
                                     if (dist < 15.0f) { 
                                         for (const auto& attackerStick : org->sticks) {
                                             if (attackerStick.isHidden) continue;
@@ -309,7 +346,7 @@ public:
                                                 float sx, sy;
                                                 getToroidalDiff(org->points[attackerStick.p1_idx].x, org->points[attackerStick.p1_idx].y, 
                                                                 other->points[0].x, other->points[0].y, sx, sy);
-                                                if (sx*sx + sy*sy < 4.0f) { 
+                                                if (sx*sx + sy*sy < carnivoreAtkSq) { 
                                                     std::scoped_lock lock(org->orgMutex, other->orgMutex);
                                                     if (other->isAlive) {
                                                         float dmg = damageAmount * dt;
@@ -318,7 +355,7 @@ public:
                                                             other->energy -= (dmg * 0.5f); 
                                                         }
                                                         other->energy -= dmg;
-                                                        org->energy += dmg * 0.8f; 
+                                                        org->energy += dmg * carnivoreEfficiency; 
                                                         other->damageFlash = 0.2f;
                                                     }
                                                 }
@@ -327,15 +364,29 @@ public:
                                                 float sx, sy;
                                                 getToroidalDiff(org->points[attackerStick.p1_idx].x, org->points[attackerStick.p1_idx].y, 
                                                                 other->points[0].x, other->points[0].y, sx, sy);
-                                                if (sx*sx + sy*sy < 4.0f) {
+                                                if (sx*sx + sy*sy < herbivoreAtkSq) {
                                                     std::scoped_lock lock(org->orgMutex, other->orgMutex);
                                                     if (other->isAlive) {
-                                                        org->energy += 150.0f;
+                                                        org->energy += herbivoreEatEnergy;
                                                         other->energy = -10.0f; 
                                                         other->isAlive = false;
                                                         other->markedForDeletion = true;
                                                     }
                                                 }
+                                            }
+                                        }
+                                    }
+
+                                    // External Photosynthesis Crowding
+                                    for (size_t i = 0; i < org->sticks.size(); ++i) {
+                                        if (org->sticks[i].isHidden || org->sticks[i].type != ColorType::GREEN) continue;
+                                        for (size_t j = 0; j < other->sticks.size(); ++j) {
+                                            if (other->sticks[j].isHidden || other->sticks[j].type != ColorType::GREEN) continue;
+                                            float px, py;
+                                            getToroidalDiff(other->points[other->sticks[j].p1_idx].x, other->points[other->sticks[j].p1_idx].y, 
+                                                            org->points[org->sticks[i].p1_idx].x, org->points[org->sticks[i].p1_idx].y, px, py);
+                                            if (px*px + py*py < crowdSq) { 
+                                                stickShade[i] += 1.0f;
                                             }
                                         }
                                     }
@@ -345,7 +396,9 @@ public:
                     }
                 }
     
-                // AI Processing & Movement
+                int visibleSegments = org->dna.genes.size() * org->dna.symmetry;
+                float effectiveSegmentCost = segmentCost / (1.0f + (sizeDiscount * visibleSegments));
+
                 for (size_t i = 0; i < org->sticks.size(); i++) {
                     if (org->sticks[i].isHidden) continue;
 
@@ -353,8 +406,11 @@ public:
                     if (geneIdx < 0 || geneIdx >= (int)org->dna.genes.size()) continue;
                     Gene& gene = org->dna.genes[geneIdx];
 
+                    netEnergy -= effectiveSegmentCost * timeScale;
+
                     if (org->sticks[i].type == ColorType::GREEN) {
-                        netEnergy += photosynthesisRate * org->sticks[i].rest_length * timeScale;
+                        float efficiency = 1.0f / (1.0f + stickShade[i] * shadePenalty);
+                        netEnergy += photosynthesisRate * org->sticks[i].rest_length * timeScale * efficiency;
                     } else if (org->sticks[i].type == ColorType::PURPLE) {
                         org->hasShield = true; 
                         netEnergy -= shieldCost * timeScale;
@@ -365,15 +421,11 @@ public:
                                              ((1.0f - org->sensorHazardDistance) * gene.weight_HazardSensor) + 
                                              gene.bias;
     
-                        // Flex Motorized Joints using their invisible structural brace
                         if (org->sticks[i].isMotorized && org->sticks[i].brace_idx != -1) {
                             int bIdx = org->sticks[i].brace_idx;
                             float targetFlex = std::clamp(neuralSignal, -1.0f, 1.0f);
                             
-                            // Dynamically adjust rest length of the brace to bend the joint!
                             org->sticks[bIdx].rest_length = org->sticks[bIdx].base_length + targetFlex * org->sticks[bIdx].flex_range;
-                            
-                            // Pay a little energy for muscle flexing
                             netEnergy -= std::abs(targetFlex) * movementCost * 0.5f * timeScale;
                         }
 
@@ -410,7 +462,6 @@ public:
                     }
                 }
     
-                // Reproduction
                 if (org->isAlive && org->energy >= 300.0f && org->reproCooldown <= 0.0f) {
                     float spawnChance = (org->energy - 300.0f) / 300.0f; 
                     if (randFloat(rng) < spawnChance * dt * 2.0f) { 
@@ -429,7 +480,6 @@ public:
                 }
             } 
     
-            // --- 3. Verlet Integration with Velocity Clamp & World Wrap ---
             for (auto& p : org->points) {
                 float vx = (p.x - p.old_x) * 0.95f; 
                 float vy = (p.y - p.old_y) * 0.95f;
@@ -452,7 +502,6 @@ public:
                 else if (p.y > WORLD_HEIGHT) { p.y -= WORLD_HEIGHT; p.old_y -= WORLD_HEIGHT; }
             }
     
-            // --- 4. Toroidal Constraint Solving (Rigidity) ---
             for (int iter = 0; iter < 4; iter++) {
                 for (auto& stick : org->sticks) {
                     Point& p1 = org->points[stick.p1_idx];
@@ -468,7 +517,6 @@ public:
             }
         }); 
     
-        // 3. Serial Cleanup & Spawning
         for (auto& req : spawnRequests) queueOrganism(req.dna, req.x, req.y, req.energy);
         spawnRequests.clear();
     

@@ -6,6 +6,7 @@
 #include "Types.h"
 #include <vector>
 #include <thread>
+#include <algorithm> // for std::max
 
 std::mt19937 rng(42);
 std::uniform_real_distribution<float> randFloat(0.0f, 1.0f);
@@ -25,7 +26,7 @@ void renderWorld(const World& world) {
 
         glBegin(GL_LINES); 
         for (const auto& stick : org->sticks) {
-            if (stick.isHidden) continue; // Don't render invisible rigid braces
+            if (stick.isHidden) continue;
 
             const Point& p1 = org->points[stick.p1_idx];
             const Point& p2 = org->points[stick.p2_idx];
@@ -46,7 +47,6 @@ void renderWorld(const World& world) {
             float dx = p2.x - p1.x;
             float dy = p2.y - p1.y;
 
-            // Check if the stick is wrapping
             if (std::abs(dx) > world.WORLD_WIDTH * 0.5f || std::abs(dy) > world.WORLD_HEIGHT * 0.5f) {
                 float g2x = p2.x, g2y = p2.y;
                 if (dx > world.WORLD_WIDTH * 0.5f) g2x -=world.WORLD_WIDTH;
@@ -129,47 +129,107 @@ int main() {
             carnivoreHistory.erase(carnivoreHistory.begin()); carnivoreHistory.push_back((float)carnivores);
         }
 
+        ImGui::SetNextWindowSizeConstraints(ImVec2(400, 600), ImVec2(600, 900));
         ImGui::Begin("Jolt Sandbox Core Monitor");
+        
+        // --- Core Simulation Stats ---
         ImGui::Text("Population: %zu / %d", world.population.size(), world.maxPopulation);
         ImGui::SliderFloat("Time Scale", &world.timeScale, 0.0f, 5.0f);
-        ImGui::SliderInt("Max Population", &world.maxPopulation, 10, 100000); 
+        ImGui::SliderInt("Max Population", &world.maxPopulation, 10, 10000); 
         ImGui::Text("Active Cores: %d", std::thread::hardware_concurrency());
         
-        ImGui::Separator();
-        ImGui::Text("Demographics & Traits");
-        ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Plants: %d", plants);
-        ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.9f, 1.0f), "Herbivores: %d", herbivores);
-        ImGui::TextColored(ImVec4(0.9f, 0.2f, 0.2f, 1.0f), "Carnivores: %d", carnivores);
-        ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "Avg Symmetry: %.2f", avgSym);
-        ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "Avg Lifespan: %.1f", avgLife);
-        
-        ImGui::PlotLines("Total", popHistory.data(), popHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
-        ImGui::PlotLines("Plants", plantHistory.data(), plantHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
-        ImGui::PlotLines("Herbivores", herbivoreHistory.data(), herbivoreHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
-        ImGui::PlotLines("Carnivores", carnivoreHistory.data(), carnivoreHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
+        if (ImGui::CollapsingHeader("Demographics & Traits", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Plants: %d", plants);
+            ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.9f, 1.0f), "Herbivores: %d", herbivores);
+            ImGui::TextColored(ImVec4(0.9f, 0.2f, 0.2f, 1.0f), "Carnivores: %d", carnivores);
+            ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "Avg Symmetry: %.2f", avgSym);
+            ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "Avg Lifespan: %.1f", avgLife);
+            
+            ImGui::PlotLines("Total", popHistory.data(), popHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
+            ImGui::PlotLines("Plants", plantHistory.data(), plantHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
+            ImGui::PlotLines("Herbivores", herbivoreHistory.data(), herbivoreHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
+            ImGui::PlotLines("Carnivores", carnivoreHistory.data(), carnivoreHistory.size(), 0, NULL, 0.0f, (float)world.maxPopulation, ImVec2(0, 40));
+        }
 
-        ImGui::Separator();
-        ImGui::Text("Evolution Pressures");
-        ImGui::SliderFloat("Mutation Rate", &world.mutationRate, 0.01f, 1.0f);
-        ImGui::SliderFloat("Photosynthesis Rate", &world.photosynthesisRate, 0.1f, 2.0f);
-        ImGui::SliderFloat("Base Metabolism", &world.baseMetabolism, 0.01f, 0.5f, "%.3f");
-        ImGui::SliderFloat("Movement Cost", &world.movementCost, 0.0001f, 0.01f, "%.4f");
-        
-        ImGui::Separator();
-        ImGui::Text("Physical Forces");
-        ImGui::SliderFloat("Thrust Power", &world.thrustMultiplier, 0.0f, 2.0f);
-        ImGui::SliderFloat("Turn Power", &world.turnMultiplier, 0.0f, 1.0f);
-        ImGui::SliderFloat("World X", &world.WORLD_WIDTH, 50.0f, 1000.0f);
-        ImGui::SliderFloat("World Y", &world.WORLD_HEIGHT, 50.0f, 1000.0f);
-        
-        
-        ImGui::Separator();
-        ImGui::Text("Component Rules");
-        ImGui::SliderFloat("Damage Amount", &world.damageAmount, 10.0f, 200.0f);
-        ImGui::SliderFloat("Shield Cost", &world.shieldCost, 0.0f, 2.0f);
-        ImGui::SliderFloat("Shield Efficiency", &world.shieldEfficiency, 0.0f, 1.0f);
-        
+        if (ImGui::CollapsingHeader("Global Physical Rules")) {
+            ImGui::SliderFloat("Base Metabolism", &world.baseMetabolism, 0.01f, 0.5f, "%.3f");
+            ImGui::SliderFloat("Segment Upkeep Cost", &world.segmentCost, 0.0f, 0.1f, "%.3f");
+            ImGui::SliderFloat("Size Upkeep Discount", &world.sizeDiscount, 0.0f, 0.05f, "%.3f");
+            ImGui::SliderFloat("World X", &world.WORLD_WIDTH, 50.0f, 1000.0f);
+            ImGui::SliderFloat("World Y", &world.WORLD_HEIGHT, 50.0f, 1000.0f);
+        }
 
+        if (ImGui::CollapsingHeader("Evolution & Mutation Limits")) {
+            ImGui::SliderFloat("Global Mutation Rate", &world.mutationRate, 0.01f, 1.0f);
+            
+            ImGui::SeparatorText("Probabilities (when mutating)");
+            ImGui::SliderFloat("Type Change Chance", &world.mutChanceType, 0.0f, 1.0f);
+            ImGui::SliderFloat("Joint Flex Toggle Chance", &world.mutChanceMotor, 0.0f, 1.0f);
+            ImGui::SliderFloat("Add Segment Chance", &world.mutChanceAddNode, 0.0f, 2.0f);
+            
+            ImGui::SeparatorText("Trait Boundaries");
+            ImGui::SliderInt("Min Symmetry", &world.minSymmetry, 1, 8);
+            ImGui::SliderInt("Max Symmetry", &world.maxSymmetry, 1, 8);
+            if (world.minSymmetry > world.maxSymmetry) world.maxSymmetry = world.minSymmetry; // Keep bounds sane
+            
+            ImGui::SliderFloat("Min Lifespan", &world.minLifespan, 5.0f, 200.0f);
+            ImGui::SliderFloat("Max Lifespan", &world.maxLifespan, 5.0f, 200.0f);
+            if (world.minLifespan > world.maxLifespan) world.maxLifespan = world.minLifespan;
+        }
+        
+        if (ImGui::CollapsingHeader("Segment Types & Rules")) {
+            
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 0.9f, 0.2f, 1.0f));
+            ImGui::SeparatorText("GREEN (Plant)");
+            ImGui::PopStyleColor();
+            ImGui::TextWrapped("Generates energy passively via photosynthesis. Grouping segments too closely causes shading, which lowers efficiency.");
+            ImGui::SliderFloat("Photosynthesis Rate", &world.photosynthesisRate, 0.1f, 2.0f);
+            ImGui::SliderFloat("Shade Penalty", &world.shadePenalty, 0.0f, 2.0f);
+            ImGui::SliderFloat("Shade Radius", &world.greenCrowdRadius, 1.0f, 20.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
+            ImGui::SeparatorText("WHITE (Herbivore)");
+            ImGui::PopStyleColor();
+            ImGui::TextWrapped("Instantly kills other organisms by touching them, stealing a fixed chunk of energy.");
+            ImGui::SliderFloat("Energy Gained/Kill", &world.herbivoreEatEnergy, 10.0f, 500.0f);
+            ImGui::SliderFloat("Eat Range", &world.herbivoreAttackRange, 0.5f, 10.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.2f, 0.2f, 1.0f));
+            ImGui::SeparatorText("RED (Carnivore)");
+            ImGui::PopStyleColor();
+            ImGui::TextWrapped("Deals continuous DPS to segments in range, converting a percentage of damage into energy.");
+            ImGui::SliderFloat("Damage / Second", &world.damageAmount, 10.0f, 200.0f);
+            ImGui::SliderFloat("Attack Range", &world.carnivoreAttackRange, 0.5f, 10.0f);
+            ImGui::SliderFloat("Energy Efficiency", &world.carnivoreEfficiency, 0.1f, 2.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.2f, 0.9f, 1.0f));
+            ImGui::SeparatorText("PURPLE (Shield Armor)");
+            ImGui::PopStyleColor();
+            ImGui::TextWrapped("Defensive armor. Mitigates incoming red carnivore damage but requires constant energy upkeep.");
+            ImGui::SliderFloat("Shield Efficiency", &world.shieldEfficiency, 0.0f, 1.0f);
+            ImGui::SliderFloat("Shield Upkeep Cost", &world.shieldCost, 0.0f, 2.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.8f, 0.2f, 1.0f));
+            ImGui::SeparatorText("YELLOW (Thruster Muscle)");
+            ImGui::PopStyleColor();
+            ImGui::TextWrapped("Fires linear thrust based on neural sensors, consuming energy relative to the force applied.");
+            ImGui::SliderFloat("Thrust Power", &world.thrustMultiplier, 0.0f, 2.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 0.4f, 0.9f, 1.0f));
+            ImGui::SeparatorText("BLUE (Torque Muscle)");
+            ImGui::PopStyleColor();
+            ImGui::TextWrapped("Fires rotational torque based on neural sensors, consuming energy relative to the turning force.");
+            ImGui::SliderFloat("Turn Power", &world.turnMultiplier, 0.0f, 1.0f);
+
+            ImGui::Text("Movement Energy Cost");
+            ImGui::SliderFloat("Action Cost", &world.movementCost, 0.0001f, 0.01f, "%.4f");
+            
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+            ImGui::SeparatorText("DEAD (Grey)");
+            ImGui::PopStyleColor();
+            ImGui::TextWrapped("Dead segments that act as rigid structural scaffolding or corpses. They do nothing but take up space.");
+        }
+        
         ImGui::Separator();
         ImGui::Text("Camera Controls: W, A, S, D, Q (Zoom In), E (Zoom Out)");
 
