@@ -63,35 +63,41 @@ public:
 };
 
 class BiologyContactListener : public ContactListener {
-    std::mutex eatingMutex;
-public:
-    virtual void OnContactAdded(const Body &inBody1, const Body &inBody2, const ContactManifold &inManifold, ContactSettings &ioSettings) override {
-        Segment* segA = reinterpret_cast<Segment*>(inBody1.GetUserData());
-        Segment* segB = reinterpret_cast<Segment*>(inBody2.GetUserData());
-        if (!segA || !segB || segA->parentOrg == segB->parentOrg) return;
+    public:
+        virtual void OnContactAdded(const Body &inBody1, const Body &inBody2, const ContactManifold &inManifold, ContactSettings &ioSettings) override {
+            Segment* segA = reinterpret_cast<Segment*>(inBody1.GetUserData());
+            Segment* segB = reinterpret_cast<Segment*>(inBody2.GetUserData());
+            if (!segA || !segB || segA->parentOrg == segB->parentOrg) return;
+    
+            auto tryEatPlant = [](Segment* eater, Segment* food) {
+                if (eater->type == ColorType::WHITE && food->type == ColorType::GREEN) {
+                    // scoped_lock locks both organisms instantly without causing deadlocks!
+                    std::scoped_lock lock(eater->parentOrg->orgMutex, food->parentOrg->orgMutex);
+                    if (food->parentOrg->isAlive) {
+                        eater->parentOrg->energy += 120.0f; 
+                        food->parentOrg->markedForDeletion = true; 
+                        food->parentOrg->isAlive = false;
+                    }
+                }
+            };
+            tryEatPlant(segA, segB);
+            tryEatPlant(segB, segA);
+            
+            auto tryAttack = [](Segment* attacker, Segment* victim) {
+                if (attacker->type == ColorType::RED && victim->type != ColorType::RED) {
+                    std::scoped_lock lock(attacker->parentOrg->orgMutex, victim->parentOrg->orgMutex);
+                    if (victim->parentOrg->isAlive) {
+                        victim->parentOrg->energy -= 60.0f; 
+                        attacker->parentOrg->energy += 40.0f; 
+                    }
+                }
+            };
+            tryAttack(segA, segB);
+            tryAttack(segB, segA);
+        }
+    };
+    
 
-        std::lock_guard<std::mutex> lock(eatingMutex);
-        
-        auto tryEatPlant = [](Segment* eater, Segment* food) {
-            if (eater->type == ColorType::WHITE && food->type == ColorType::GREEN && food->parentOrg->isAlive) {
-                eater->parentOrg->energy += 120.0f; 
-                food->parentOrg->markedForDeletion = true; 
-                food->parentOrg->isAlive = false;
-            }
-        };
-        tryEatPlant(segA, segB);
-        tryEatPlant(segB, segA);
-        
-        auto tryAttack = [](Segment* attacker, Segment* victim) {
-            if (attacker->type == ColorType::RED && victim->type != ColorType::RED && victim->parentOrg->isAlive) {
-                victim->parentOrg->energy -= 60.0f; 
-                attacker->parentOrg->energy += 40.0f; 
-            }
-        };
-        tryAttack(segA, segB);
-        tryAttack(segB, segA);
-    }
-};
 
 class JoltWrapper {
 public:
@@ -112,7 +118,7 @@ public:
         Factory::sInstance = new Factory();
         RegisterTypes();
 
-        tempAllocator = new TempAllocatorImpl(1024 * 1024 * 1024);
+        tempAllocator = new TempAllocatorImpl(1 * 1024 * 1024 * 1024);
         jobSystem = new JobSystemThreadPool(cMaxPhysicsJobs, cMaxPhysicsBarriers, thread::hardware_concurrency() - 1);
 
         physicsSystem = new PhysicsSystem();
@@ -130,6 +136,15 @@ public:
         delete tempAllocator;
         delete Factory::sInstance;
         Factory::sInstance = nullptr;
+    }
+
+    // FIX: We only clean up joints now. Bodies will be deleted in a hyper-fast batch.
+    void cleanupJoints(int orgID) {
+        auto it = orgJoints.find(orgID);
+        if (it != orgJoints.end()) {
+            for (auto& constraint : it->second) physicsSystem->RemoveConstraint(constraint);
+            orgJoints.erase(it);
+        }
     }
 
     void stepPhysics(float dt) {
