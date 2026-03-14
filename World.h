@@ -81,42 +81,59 @@ public:
         std::vector<std::unique_ptr<Organism>> babies;
         std::mutex babyMutex; 
 
-        // 1. Biological Updates & Reproduction (MULTI-THREADED)
-        std::for_each(std::execution::par, population.begin(), population.end(), [&](auto& org) {
-            std::vector<float> sensors = { 
-                std::max(0.0f, (float)std::sin(worldTime * 5.0f) * 2.0f),  
-                std::max(0.0f, (float)-std::sin(worldTime * 5.0f) * 2.0f)  
-            }; 
-            org->brain.setSensoryInputs(sensors);
-            
-            org->updateBiology(dt, config);
+        // 1. REFRESH ORGANISM GRID (Sequential but fast)
+        engine.clearOrgGrid();
+        for (auto& org : population) {
+            if (org->isAlive) engine.addOrgToGrid(org->points[0].x, org->points[0].y, org.get());
+        }
 
-            if (org->isAlive && 
-                org->energy >= config.reproductionEnergyThreshold && 
-                org->reproCooldown <= 0.0f) 
-            {
-                org->energy -= config.reproductionEnergyCost;
-                org->reproCooldown = config.reproductionCooldown;
-    
-                Genome childDNA = org->dna; 
-                childDNA.mutate(config);
-    
-                float childX = org->points[0].x + 10.0f;
-                float childY = org->points[0].y + 10.0f;
-                
-                std::lock_guard<std::mutex> lock(babyMutex);
-                if ((population.size() + babies.size()) < (size_t)config.maxPopulation) {
-                    babies.push_back(std::make_unique<Organism>(
-                        nextOrgId++, 
-                        childDNA, 
-                        config.startingEnergy, 
-                        childX, 
-                        childY
-                    ));
-                } else {
-                    org->energy += config.reproductionEnergyCost;
-                    org->reproCooldown = 0.0f; 
+        // 2. BIOLOGY & PREDATION (64-CORE PARALLEL)
+        std::for_each(std::execution::par, population.begin(), population.end(), [&](auto& org) {
+            if (!org->isAlive) return;
+
+            // Density for "Shade" penalty
+            float density = engine.getNearbyCount(org->points[0].x, org->points[0].y, 30.0f);
+            float shade = std::min(1.0f, density / 12.0f); 
+
+            // Combat Pass (Red segments)
+            float combatGain = 0.0f;
+            for (size_t i = 0; i < org->bodyParts.size(); ++i) {
+                if (org->bodyParts[i].type == ColorType::RED) {
+                    auto& spike = org->points[org->springs[i].p2_idx];
+                    auto victims = engine.getNearbyOrganisms(spike.x, spike.y, 10.0f);
+                    for (auto* victim : victims) {
+                        if (victim->id == org->id) continue;
+                        float damage = 60.0f * dt;
+                        std::lock_guard<std::mutex> lock(victim->orgMutex); // Thread-safe bite
+                        victim->energy -= damage;
+                        combatGain += damage * 0.75f; 
+                    }
                 }
+            }
+
+            // Brain Input: 0 = Energy, 1 = Local Population Density
+            org->brain.setSensoryInputs({ org->energy * 0.01f, density * 0.1f });
+            org->updateBiology(dt, config, shade, combatGain);
+
+            // 5. REPRODUCTION 
+            if (org->isAlive && org->energy >= config.reproductionEnergyThreshold && org->reproCooldown <= 0.0f) {
+                org->energy -= config.reproductionEnergyThreshold * 0.5f; // Pay the energy cost of birth
+                org->reproCooldown = 15.0f; // Reset cooldown so they don't explode with babies
+
+                Genome childDNA = org->dna;
+                childDNA.mutate(config);
+
+                // Spawn the baby slightly offset from the parent
+                // Note: rand() can cause thread contention. For a production-grade 
+                // parallel loop, use a thread_local std::mt19937, but this works for now.
+                float offsetX = ((rand() % 100) / 100.0f * 40.0f) - 20.0f;
+                float offsetY = ((rand() % 100) / 100.0f * 40.0f) - 20.0f;
+                float childX = org->points[0].x + offsetX;
+                float childY = org->points[0].y + offsetY;
+
+                // Lock the mutex ONLY for the shared resource updates to keep the loop fast
+                std::lock_guard<std::mutex> lock(babyMutex);
+                babies.push_back(std::make_unique<Organism>(nextOrgId++, childDNA, config.startingEnergy, childX, childY));
             }
         });
 

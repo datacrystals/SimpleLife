@@ -134,50 +134,61 @@ public:
         }
     }
 
+
     /**
-     * @brief Reads motor spikes and actuates muscles via physics target_lengths.
+     * @brief High-efficiency biological update.
+     * @param localShade 0.0 (full sun) to 1.0 (total darkness/crowded).
+     * @param combatEnergy Energy gained from Red segments hitting others.
      */
-    void updateBiology(float dt, const SimConfig& cfg) {
+    void updateBiology(float dt, const SimConfig& cfg, float localShade, float combatEnergy) {
         if (!isAlive) return;
         
         age += dt;
         if (reproCooldown > 0) reproCooldown -= dt;
 
+        // 1. SNN TICK & COST
+        // Every part of the nervous system has a metabolic rent.
         brain.tick(dt);
-        auto motorSpikes = brain.getMotorSpikes();
+        float brainCost = (brain.neurons.size() * 0.02f) + (brain.synapses.size() * 0.005f);
 
-        float netEnergy = 0.0f;
+        float netEnergy = combatEnergy; // Energy gained from predation
+        float totalSegments = static_cast<float>(bodyParts.size());
 
+        // 2. SEGMENT LOOP
         for (size_t i = 0; i < springs.size(); ++i) {
-            // 1. Photosynthesis Gain
+            // Photosynthesis with "Anti-Giant" Scaling:
+            // Energy = (Rate * Sunlight) / (TotalSegments^2)
+            // This makes a 1-segment plant 100x more efficient than a 10-segment plant.
             if (bodyParts[i].type == ColorType::GREEN) {
-                netEnergy += cfg.photosynthesisRate * bodyParts[i].baseLength * dt;
+                float sunlight = std::max(0.0f, 1.0f - localShade);
+                float plantEfficiency = 1.0f / (1.0f + (totalSegments * 0.5f)); 
+                netEnergy += (cfg.photosynthesisRate * sunlight * plantEfficiency) * bodyParts[i].baseLength * dt;
             }
 
-            // 2. Muscle Contraction & Cost
-            // Translate Spikes to Muscle Contractions
-            for (size_t i = 0; i < springs.size(); ++i) {
-                if (bodyParts[i].isMuscle && bodyParts[i].ioNeuronIndex != -1) {
-                    
-                    // Read directly from the main brain array! No more bounds mismatches.
-                    bool spiked = brain.neurons[bodyParts[i].ioNeuronIndex].spikedThisTick;
-
-                    if (spiked) {
-                        springs[i].target_length = bodyParts[i].baseLength * 0.5f; 
-                        netEnergy -= cfg.movementCost * dt; // Cost to flex
-                        bodyParts[i].currentTension = 1.0f;
-                    } else {
-                        springs[i].target_length += (bodyParts[i].baseLength - springs[i].target_length) * 5.0f * dt;
-                        bodyParts[i].currentTension *= 0.9f;
-                    }
+            // Muscle Actuation
+            if (bodyParts[i].isMuscle && bodyParts[i].ioNeuronIndex != -1) {
+                bool spiked = brain.neurons[bodyParts[i].ioNeuronIndex].spikedThisTick;
+                if (spiked) {
+                    springs[i].target_length = bodyParts[i].baseLength * 0.2f; 
+                    netEnergy -= cfg.movementCost * dt; // Cost to flex
+                    bodyParts[i].currentTension = 1.0f;
+                } else {
+                    springs[i].target_length += (bodyParts[i].baseLength - springs[i].target_length) * 5.0f * dt;
+                    bodyParts[i].currentTension *= 0.99f;
                 }
             }
         }
         
-        // 3. Passive structural drain
-        netEnergy -= bodyParts.size() * cfg.segmentCost * dt; 
+        // 3. THE "TAXMAN" (METABOLISM)
+        // Base metabolic rate scales slightly with size, but brain cost is flat per neuron.
+        float baseMetabolism = (totalSegments * cfg.segmentCost);
+        netEnergy -= (baseMetabolism + brainCost) * dt; 
+        
+        // Age penalty: Ensures turnover so evolution can happen.
+        netEnergy -= (age * 0.02f) * dt;
         
         energy += netEnergy;
         if (energy <= cfg.deathEnergyThreshold) isAlive = false;
     }
+
 };

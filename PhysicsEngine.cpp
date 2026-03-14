@@ -10,7 +10,16 @@
 
 
 PhysicsEngine::PhysicsEngine(float width, float height) 
-    : worldWidth(width), worldHeight(height) {}
+    : worldWidth(width), worldHeight(height) {
+
+        // Calculate columns and rows, ensuring they are at least 1
+        orgCols = std::max(1, static_cast<int>(std::ceil(worldWidth / orgCellSize)));
+        orgRows = std::max(1, static_cast<int>(std::ceil(worldHeight / orgCellSize)));
+
+        // Pre-allocate the grid
+        orgGrid.resize(orgCols * orgRows);
+
+    }
 
 void PhysicsEngine::getToroidalDiff(float x1, float y1, float x2, float y2, float& dx, float& dy) const {
     dx = x2 - x1;
@@ -22,6 +31,38 @@ void PhysicsEngine::getToroidalDiff(float x1, float y1, float x2, float y2, floa
     
     if (dy > worldHeight * 0.5f) dy -= worldHeight;
     else if (dy < -worldHeight * 0.5f) dy += worldHeight;
+}
+
+void PhysicsEngine::clearOrgGrid() {
+    for (auto& cell : orgGrid) cell.clear();
+}
+
+void PhysicsEngine::addOrgToGrid(float x, float y, Organism* org) {
+    int cx = ((static_cast<int>(x / orgCellSize) % orgCols) + orgCols) % orgCols;
+    int cy = ((static_cast<int>(y / orgCellSize) % orgRows) + orgRows) % orgRows;
+    orgGrid[cy * orgCols + cx].push_back(org);
+}
+
+std::vector<Organism*> PhysicsEngine::getNearbyOrganisms(float x, float y, float radius) const {
+    std::vector<Organism*> found;
+    int cx = ((static_cast<int>(x / orgCellSize) % orgCols) + orgCols) % orgCols;
+    int cy = ((static_cast<int>(y / orgCellSize) % orgRows) + orgRows) % orgRows;
+    float rSq = radius * radius;
+
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            int nx = (cx + dx + orgCols) % orgCols;
+            int ny = (cy + dy + orgRows) % orgRows;
+            for (auto* other : orgGrid[ny * orgCols + nx]) {
+                found.push_back(other);
+            }
+        }
+    }
+    return found;
+}
+
+float PhysicsEngine::getNearbyCount(float x, float y, float radius) const {
+    return static_cast<float>(getNearbyOrganisms(x, y, radius).size());
 }
 
 void PhysicsEngine::step(std::vector<PhysicsPoint>& points, std::vector<PhysicsSpring>& springs, float dt) {
@@ -188,4 +229,10 @@ void PhysicsEngine::resolveGlobalCollisions(const std::vector<PhysicsPoint*>& al
 void PhysicsEngine::updateBounds(float w, float h) {
     worldWidth = w;
     worldHeight = h;
+
+    // Recalculate grid dimensions when the world size changes
+    orgCols = std::max(1, static_cast<int>(std::ceil(worldWidth / orgCellSize)));
+    orgRows = std::max(1, static_cast<int>(std::ceil(worldHeight / orgCellSize)));
+    
+    orgGrid.assign(orgCols * orgRows, std::vector<Organism*>());
 }
