@@ -3,9 +3,9 @@
  * @brief Represents a single entity. Ties physics, biology, and the SNN together.
  */
 #pragma once
-#include "PhysicsTypes.h"
+#include "Physics/PhysicsTypes.h"
 #include "Genetics.h"
-#include "Brain.h"
+#include "Brain/Brain.h"
 #include <vector>
 #include <mutex>
 #include <cmath>

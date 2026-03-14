@@ -9,7 +9,7 @@
 #include <cmath>
 
 #include "SimConfig.h" // Ensure you include this
-#include "Brain.h" // For NeuronRole and NeuronPolarity
+#include "Brain/Brain.h" // For NeuronRole and NeuronPolarity
 
 enum class ColorType { GREEN, RED, PURPLE, BLUE, YELLOW, WHITE, DEAD };
 

@@ -4,9 +4,9 @@
  */
 #pragma once
 #include "SimConfig.h"
-#include "PhysicsEngine.h"
-#include "Organism.h"
-#include "Serialization.h"
+#include "Physics/PhysicsEngine.h"
+#include "Biology/Organism.h"
+#include "Biology/Serialization.h"
 #include <vector>
 #include <memory>
 #include <mutex>
