@@ -109,14 +109,99 @@ public:
             float combatGain = 0.0f;
             for (size_t i = 0; i < org->bodyParts.size(); ++i) {
                 if (org->bodyParts[i].type == ColorType::RED) {
-                    auto& spike = org->points[org->springs[i].p2_idx];
+                    auto& spike = org->points[org->springs[i].p2_idx]; // The pointy end
                     auto victims = engine.getNearbyOrganisms(spike.x, spike.y, 10.0f);
+                    
                     for (auto* victim : victims) {
                         if (victim->id == org->id) continue;
-                        float damage = config.carnivoreDamagePerSec * dt;
+                        
+                        bool hitShield = false;
+                        float closestDistSq = 999999.0f;
+                        ColorType hitPartType = ColorType::DEAD;
+
+                        // Find exactly which body part of the victim was struck
+                        for (size_t j = 0; j < victim->bodyParts.size(); ++j) {
+                            auto& v_p1 = victim->points[victim->springs[j].p1_idx];
+                            auto& v_p2 = victim->points[victim->springs[j].p2_idx];
+                            
+                            // Approximate segment collision by checking distance to its midpoint
+                            float midX = (v_p1.x + v_p2.x) * 0.5f;
+                            float midY = (v_p1.y + v_p2.y) * 0.5f;
+                            float distSq = (spike.x - midX) * (spike.x - midX) + (spike.y - midY) * (spike.y - midY);
+                            
+                            if (distSq < closestDistSq) {
+                                closestDistSq = distSq;
+                                hitPartType = victim->bodyParts[j].type;
+                            }
+                        }
+
+                        // Check if within strike range and the struck part is a shield
+                        if (closestDistSq < (config.carnivoreAttackRange * config.carnivoreAttackRange * 25.0f)) {
+                            if (hitPartType == ColorType::PURPLE) {
+                                hitShield = true;
+                            }
+                        }
+
+                        float rawDamage = config.carnivoreDamagePerSec * dt;
+                        
                         std::lock_guard<std::mutex> lock(victim->orgMutex); // Thread-safe bite
-                        victim->energy -= damage;
-                        combatGain += damage * 0.75f; 
+                        
+                        if (hitShield) {
+                            // Shield mitigates damage but drains the victim's energy to maintain the block
+                            float mitigatedDamage = rawDamage * (1.0f - config.shieldEfficiency);
+                            victim->energy -= (mitigatedDamage + config.shieldCost);
+                            combatGain += mitigatedDamage * config.carnivoreEfficiency; 
+                            victim->damageFlash = 1.0f; // Visual feedback for the block
+                        } else {
+                            // Clean hit, full damage
+                            victim->energy -= rawDamage;
+                            combatGain += rawDamage * config.carnivoreEfficiency;
+                            victim->damageFlash = 1.0f;
+                        }
+                    }
+                }
+            }
+
+            // Thruster Pass (Blue segments)
+            for (size_t i = 0; i < org->bodyParts.size(); ++i) {
+                if (org->bodyParts[i].type == ColorType::BLUE) {
+                    
+                    // Fetch the direct index into the brain's neuron array
+                    int neuronIdx = org->bodyParts[i].ioNeuronIndex; 
+                    
+                    if (neuronIdx != -1) {
+                        // In an SNN, we check if the neuron fired a spike this exact tick
+                        bool spiked = org->brain.neurons[neuronIdx].spikedThisTick; 
+                        
+                        if (spiked) { 
+                            int p1_idx = org->springs[i].p1_idx;
+                            int p2_idx = org->springs[i].p2_idx;
+                            
+                            // Calculate the direction vector of the segment
+                            float dx = org->points[p2_idx].x - org->points[p1_idx].x;
+                            float dy = org->points[p2_idx].y - org->points[p1_idx].y;
+                            float length = std::sqrt(dx * dx + dy * dy);
+                            
+                            if (length > 0.001f) {
+                                // Normalize the vector
+                                float dirX = dx / length;
+                                float dirY = dy / length;
+                                
+                                // Impulse thrust force triggered by the spike
+                                // (You can move 150.0f to SimConfig if you want to tune it later)
+                                float thrustForce = 150.0f; 
+                                
+                                // Apply linear acceleration to both points of the segment
+                                // Pushing "forward" along the axis of the stick from p1 to p2
+                                org->points[p1_idx].ax += dirX * thrustForce;
+                                org->points[p1_idx].ay += dirY * thrustForce;
+                                org->points[p2_idx].ax += dirX * thrustForce;
+                                org->points[p2_idx].ay += dirY * thrustForce;
+                                
+                                // Deduct energy for burning the thruster
+                                org->energy -= config.movementCost * 10.0f * dt;
+                            }
+                        }
                     }
                 }
             }

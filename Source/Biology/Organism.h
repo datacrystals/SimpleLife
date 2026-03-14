@@ -24,6 +24,7 @@ public:
     int id;
     Genome dna;
     float energy;
+    float damageFlash = 0.0f;
     float age = 0.0f;
     bool isAlive = true;
     bool markedForDeletion = false;
