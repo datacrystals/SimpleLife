@@ -77,6 +77,16 @@ private:
     void renderWorldGL(World& world) {
         float ww = world.getConfig().worldWidth;
         float wh = world.getConfig().worldHeight;
+    
+        // --- Draw World Border ---
+        glLineWidth(2.0f);
+        glColor3f(0.4f, 0.4f, 0.5f); // Subdued blue-grey for the border
+        glBegin(GL_LINE_LOOP);
+            glVertex2f(0, 0);
+            glVertex2f(ww, 0);
+            glVertex2f(ww, wh);
+            glVertex2f(0, wh);
+        glEnd();
 
         for (const auto& org : world.population) {
             if (org->points.empty()) continue;

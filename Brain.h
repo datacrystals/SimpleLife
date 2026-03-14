@@ -16,6 +16,8 @@ struct LIFNeuron {
     NeuronRole role;
     NeuronPolarity polarity;
 
+    float x, y;
+
     // LIF Dynamics
     float membranePotential = 0.0f;
     float threshold = 1.0f;

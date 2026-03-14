@@ -30,6 +30,8 @@ struct NeuronGene {
     float threshold;
     float leakRate;
     float restPotential;
+
+    float x, y;
 };
 
 struct SynapseGene {
@@ -103,10 +105,15 @@ struct Genome {
         }
     
         // Add a new synapse
+        // Instead of just random synapses, favor "local" clusters or loops
         if (rnd() < cfg.mutChanceAddSynapse && neurons.size() >= 2) {
             SynapseGene s;
-            s.sourceId = neurons[rand() % neurons.size()].id;
-            s.targetId = neurons[rand() % neurons.size()].id;
+            int idxA = rand() % neurons.size();
+            // 50% chance to link to a nearby neuron in the vector (creating local functional clusters)
+            int idxB = (rnd() < 0.5f) ? (idxA + 1) % neurons.size() : rand() % neurons.size();
+            
+            s.sourceId = neurons[idxA].id;
+            s.targetId = neurons[idxB].id;
             s.weight = (rnd() - 0.5f) * 2.0f;
             synapses.push_back(s);
         }

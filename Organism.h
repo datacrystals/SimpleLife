@@ -115,6 +115,8 @@ public:
             n.threshold = nGene.threshold;
             n.leakRate = nGene.leakRate;
             n.restPotential = nGene.restPotential;
+            n.x = nGene.x;
+            n.y = nGene.y;
             
             brain.neurons.push_back(n);
 
@@ -149,7 +151,6 @@ public:
         // 1. SNN TICK & COST
         // Every part of the nervous system has a metabolic rent.
         brain.tick(dt);
-        float brainCost = (brain.neurons.size() * 0.02f) + (brain.synapses.size() * 0.005f);
 
         float netEnergy = combatEnergy; // Energy gained from predation
         float totalSegments = static_cast<float>(bodyParts.size());
@@ -182,7 +183,7 @@ public:
         // 3. THE "TAXMAN" (METABOLISM)
         // Base metabolic rate scales slightly with size, but brain cost is flat per neuron.
         float baseMetabolism = (totalSegments * cfg.segmentCost);
-        netEnergy -= (baseMetabolism + brainCost) * dt; 
+        netEnergy -= (baseMetabolism) * dt; 
         
         // Age penalty: Ensures turnover so evolution can happen.
         netEnergy -= (age * 0.02f) * dt;

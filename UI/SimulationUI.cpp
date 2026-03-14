@@ -4,12 +4,15 @@ void SimulationUI::Init(GLFWwindow* window) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    // --- SCALE UI GLOBALLY ---
+    // 1.0 is default. 1.25 is 25% larger, 2.0 is double size.
+    io.FontGlobalScale = 1.25f; 
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 130");
 }
-
 void SimulationUI::Shutdown() {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

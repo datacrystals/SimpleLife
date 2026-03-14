@@ -33,42 +33,87 @@ public:
     void initializeEden() {
         population.clear();
         Genome edenDNA;
-
-        // --- BONES (The Spine) ---
+    
+        // --- 1. MORPHOLOGY (Spine, Ribs, Muscles, Green Whiskers) ---
+        //
         edenDNA.morphology.push_back({ColorType::WHITE, 0, -1, 5.0f, 0.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::WHITE, 1, -1, 5.0f, 0.0f, false, -1, 0.0f});
-
-        // --- BONES (The Ribs) ---
         edenDNA.morphology.push_back({ColorType::WHITE, 1, -1, 3.0f, 90.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::WHITE, 1, -1, 3.0f, -90.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::WHITE, 2, -1, 3.0f, 90.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::WHITE, 2, -1, 3.0f, -90.0f, false, -1, 0.0f});
-
-        // --- STRUCTURAL BRACES ---
         edenDNA.morphology.push_back({ColorType::DEAD, 1, 5, 0.0f, 0.0f, false, -1, 0.0f}); 
         edenDNA.morphology.push_back({ColorType::DEAD, 2, 3, 0.0f, 0.0f, false, -1, 0.0f}); 
         edenDNA.morphology.push_back({ColorType::DEAD, 1, 6, 0.0f, 0.0f, false, -1, 0.0f}); 
         edenDNA.morphology.push_back({ColorType::DEAD, 2, 4, 0.0f, 0.0f, false, -1, 0.0f});
-
-        // --- MUSCLES ---
+        // Muscles linked to specific IO IDs (2 and 3)
         edenDNA.morphology.push_back({ColorType::YELLOW, 3, 5, 0.0f, 0.0f, true, 2, 0.0f});
         edenDNA.morphology.push_back({ColorType::YELLOW, 4, 6, 0.0f, 0.0f, true, 3, 0.0f});
-
-        // --- GREEN WHISKERS ---
         edenDNA.morphology.push_back({ColorType::GREEN, 3, -1, 4.0f, 135.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::GREEN, 4, -1, 4.0f, -135.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::GREEN, 5, -1, 4.0f, 45.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::GREEN, 6, -1, 4.0f, -45.0f, false, -1, 0.0f});
+    
+        // --- 2. SPATIAL SNN CONNECTOME ---
+        int totalNeurons = 100;
+        int sensoryCount = 15;
+        int motorCount = 15;
+        
+        int sIdx = 0; 
+        int mIdx = 0;
 
-        // --- SNN CONNECTOME ---
-        edenDNA.neurons.push_back({0, NeuronRole::SENSORY, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
-        edenDNA.neurons.push_back({1, NeuronRole::SENSORY, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
-        edenDNA.neurons.push_back({2, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.2f, 0.0f});
-        edenDNA.neurons.push_back({3, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.2f, 0.0f});
+        for (int i = 0; i < totalNeurons; ++i) {
+            NeuronGene n;
+            n.id = i;
+            
+            // 1. Role Assignment (Preserving Eden's specific motor hooks)
+            if (i == 0 || i == 1) n.role = NeuronRole::SENSORY; 
+            else if (i == 2 || i == 3) n.role = NeuronRole::MOTOR;
+            else if (i < sensoryCount) n.role = NeuronRole::SENSORY;
+            else if (i < sensoryCount + motorCount) n.role = NeuronRole::MOTOR;
+            else n.role = NeuronRole::HIDDEN;
 
-        edenDNA.synapses.push_back({0, 2, 1.5f}); 
-        edenDNA.synapses.push_back({1, 3, 1.5f});
+            // 2. Spatial Coordinate Assignment
+            if (n.role == NeuronRole::SENSORY) {
+                n.x = 0.05f; // Hard left vertical line
+                n.y = static_cast<float>(sIdx++) / std::max(1, sensoryCount - 1);
+            } else if (n.role == NeuronRole::MOTOR) {
+                n.x = 0.95f; // Hard right vertical line
+                n.y = static_cast<float>(mIdx++) / std::max(1, motorCount - 1);
+            } else {
+                // The "Goo" in the middle (spread between x = 0.2 and 0.8)
+                n.x = 0.2f + (static_cast<float>(rand()) / RAND_MAX) * 0.6f;
+                n.y = static_cast<float>(rand()) / RAND_MAX; // Full vertical spread
+            }
 
+            // Dale's Principle: Mix of Excitatory/Inhibitory
+            n.polarity = (rand() % 10 < 8) ? NeuronPolarity::EXCITATORY : NeuronPolarity::INHIBITORY;
+            n.threshold = 1.0f;
+            n.leakRate = 0.1f;
+            n.restPotential = 0.0f;
+            edenDNA.neurons.push_back(n);
+        }
+    
+        // --- 3. PROXIMITY-BASED SYNAPSES ---
+        //
+        for (size_t i = 0; i < edenDNA.neurons.size(); ++i) {
+            for (size_t j = 0; j < edenDNA.neurons.size(); ++j) {
+                if (i == j) continue;
+                
+                float dx = edenDNA.neurons[i].x - edenDNA.neurons[j].x;
+                float dy = edenDNA.neurons[i].y - edenDNA.neurons[j].y;
+                float dist = std::sqrt(dx*dx + dy*dy);
+    
+                // Connect if close (Local clusters)
+                if (dist < 0.25f && (static_cast<float>(rand()) / RAND_MAX) < 0.4f) {
+                    float weight = (static_cast<float>(rand()) / RAND_MAX) * 2.5f; 
+                    edenDNA.synapses.push_back({edenDNA.neurons[i].id, edenDNA.neurons[j].id, weight});
+                }
+            }
+        }
+    
+        // --- 4. POPULATION SPAWN ---
+        //
         for (int i = 0; i < 20; ++i) {
             float x = (rand() % (int)config.worldWidth);
             float y = (rand() % (int)config.worldHeight);
@@ -124,6 +169,17 @@ public:
 
                 Genome childDNA = org->dna;
                 childDNA.mutate(config);
+
+
+                // Pre-Selection: Only spawn if the brain has at least one sensory-to-motor path
+                bool hasPath = false;
+                while (!hasPath) {
+                    for (const auto& syn : childDNA.synapses) {
+                        // Very simple check: Does a synapse exist between different roles?
+                        if (syn.weight != 0) { hasPath = true; break; }
+                    }
+                }
+
 
                 // Spawn the baby slightly offset from the parent
                 // Note: rand() can cause thread contention. For a production-grade 
