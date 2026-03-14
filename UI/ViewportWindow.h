@@ -134,14 +134,33 @@ private:
             }
 
             if (org->id == world.selectedOrgId) {
-                glColor3f(1.0f, 1.0f, 1.0f); // White highlight
-                glLineWidth(2.0f);
-                glBegin(GL_LINE_LOOP);
-                for(int i=0; i<16; i++) {
-                    float a = i * (6.28f / 16.0f);
-                    glVertex2f(org->points[0].x + cos(a)*5.0f, org->points[0].y + sin(a)*5.0f);
+                // Calculate AABB again for rendering
+                float minX = org->points[0].x, maxX = org->points[0].x;
+                float minY = org->points[0].y, maxY = org->points[0].y;
+            
+                for (const auto& pt : org->points) {
+                    minX = std::min(minX, pt.x); maxX = std::max(maxX, pt.x);
+                    minY = std::min(minY, pt.y); maxY = std::max(maxY, pt.y);
                 }
+            
+                float p = 1.5f; // Visual padding
+                
+                // --- Draw Dashed Yellow Box ---
+                glPushAttrib(GL_ENABLE_BIT);
+                glEnable(GL_LINE_STIPPLE);
+                glLineStipple(1, 0xF0F0); // Pattern: 1111000011110000
+                
+                glLineWidth(2.0f);
+                glColor3f(1.0f, 1.0f, 0.0f); // Bright Yellow
+                
+                glBegin(GL_LINE_LOOP);
+                    glVertex2f(minX - p, minY - p);
+                    glVertex2f(maxX + p, minY - p);
+                    glVertex2f(maxX + p, maxY + p);
+                    glVertex2f(minX - p, maxY + p);
                 glEnd();
+                
+                glPopAttrib(); // Turn off stippling automatically
             }
         }
     }
@@ -207,14 +226,40 @@ public:
             
             // Selection logic (Reuse the worldMouseX/Y calculated above)
             if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
-                float selectionThreshold = 5.0f * (camZoom / 100.0f);
                 int foundId = -1;
+                
+                // We'll track the smallest organism that contains the click 
+                // (in case they overlap, clicking a small one inside a big one works)
+                float smallestArea = std::numeric_limits<float>::max();
+            
                 for (const auto& org : world.population) {
-                    float dx = org->points[0].x - worldMouseX;
-                    float dy = org->points[0].y - worldMouseY;
-                    if (std::sqrt(dx*dx + dy*dy) < selectionThreshold) {
-                        foundId = org->id;
-                        break;
+                    if (!org->isAlive || org->points.empty()) continue;
+            
+                    // 1. Calculate the Bounding Box for this Organism
+                    float minX = org->points[0].x, maxX = org->points[0].x;
+                    float minY = org->points[0].y, maxY = org->points[0].y;
+            
+                    for (const auto& pt : org->points) {
+                        if (pt.x < minX) minX = pt.x;
+                        if (pt.x > maxX) maxX = pt.x;
+                        if (pt.y < minY) minY = pt.y;
+                        if (pt.y > maxY) maxY = pt.y;
+                    }
+            
+                    // Add a small "padding" so thin organisms are easier to click
+                    float padding = 2.0f;
+                    minX -= padding; maxX += padding;
+                    minY -= padding; maxY += padding;
+            
+                    // 2. Check if the mouse is inside the box
+                    if (worldMouseX >= minX && worldMouseX <= maxX && 
+                        worldMouseY >= minY && worldMouseY <= maxY) {
+                        
+                        float area = (maxX - minX) * (maxY - minY);
+                        if (area < smallestArea) {
+                            smallestArea = area;
+                            foundId = org->id;
+                        }
                     }
                 }
                 world.selectedOrgId = foundId;

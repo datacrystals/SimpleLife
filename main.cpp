@@ -5,6 +5,7 @@
 #include "UI/SettingsWindow.h"
 #include "UI/ViewportWindow.h"
 #include "UI/BrainMonitorWindow.h" 
+#include "UI/StatsWindow.h" 
 
 int main() {
 
@@ -44,6 +45,7 @@ int main() {
     ui.AddWindow(std::make_unique<SettingsWindow>());
     ui.AddWindow(std::make_unique<ViewportWindow>());
     ui.AddWindow(std::make_unique<BrainMonitorWindow>());
+    ui.AddWindow(std::make_unique<StatsWindow>());
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
