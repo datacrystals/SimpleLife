@@ -76,7 +76,7 @@ void renderWorld(const World& world) {
 
 int main() {
     if (!glfwInit()) return -1;
-    GLFWwindow* window = glfwCreateWindow(1400, 900, "Multithreaded Jolt ALife", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1400, 900, "Multithreaded Garden", NULL, NULL);
     glfwMakeContextCurrent(window);
 
     IMGUI_CHECKVERSION();
@@ -130,7 +130,7 @@ int main() {
         }
 
         ImGui::SetNextWindowSizeConstraints(ImVec2(400, 600), ImVec2(600, 900));
-        ImGui::Begin("Jolt Sandbox Core Monitor");
+        ImGui::Begin("Sandbox Core Controller");
         
         // --- Core Simulation Stats ---
         ImGui::Text("Population: %zu / %d", world.population.size(), world.maxPopulation);
