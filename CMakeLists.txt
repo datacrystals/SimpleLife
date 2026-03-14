@@ -49,22 +49,23 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# --- Source Discovery ---
+# This recursively finds all .cpp files in the Source directory
+file(GLOB_RECURSE PROJECT_SOURCES "Source/*.cpp")
+
 # --- Executable ---
 add_executable(garden 
-    main.cpp 
-    PhysicsEngine.cpp 
-    Brain.cpp 
-    UI/SimulationUI.cpp 
+    ${PROJECT_SOURCES}
     ${IMGUI_SOURCES} 
     ${IMPLOT_SOURCES}
 )
 
 # --- Compiler Definitions ---
-# Force ImGui/ImPlot to use 32-bit indices to prevent vertex truncation crashes
 target_compile_definitions(garden PRIVATE "ImDrawIdx=unsigned int")
 
+# Updated include directories to point to the new Source folder
 target_include_directories(garden PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source
     ${imgui_SOURCE_DIR} 
     ${imgui_SOURCE_DIR}/backends
     ${implot_SOURCE_DIR}
