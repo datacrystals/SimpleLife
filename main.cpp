@@ -6,6 +6,9 @@
 #include "UI/ViewportWindow.h"
 #include "UI/BrainMonitorWindow.h" 
 #include "UI/StatsWindow.h" 
+#include "UI/StateManagerWindow.h" 
+
+#include "implot.h"
 
 int main() {
 
@@ -13,7 +16,7 @@ int main() {
     if (!glfwInit()) return -1;
 
     // 2. Create the window
-    GLFWwindow* window = glfwCreateWindow(1920, 1080, "SNN Evolution Sandbox", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1920, 1080, "Vesper's Garden", NULL, NULL);
     if (!window) {
         glfwTerminate();
         return -1;
@@ -33,6 +36,7 @@ int main() {
     // 5. Now it is safe to initialize your UI and call glGenFramebuffers
     SimulationUI ui;
     ui.Init(window);
+    ImPlot::CreateContext();
 
 
 
@@ -46,6 +50,7 @@ int main() {
     ui.AddWindow(std::make_unique<ViewportWindow>());
     ui.AddWindow(std::make_unique<BrainMonitorWindow>());
     ui.AddWindow(std::make_unique<StatsWindow>());
+    ui.AddWindow(std::make_unique<StateManagerWindow>());
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -66,6 +71,7 @@ int main() {
     }
 
     ui.Shutdown();
+    ImPlot::DestroyContext();
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

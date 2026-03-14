@@ -6,12 +6,15 @@
 #include "SimConfig.h"
 #include "PhysicsEngine.h"
 #include "Organism.h"
+#include "Serialization.h"
 #include <vector>
 #include <memory>
 #include <mutex>
 #include <algorithm>
 #include <execution>
+#include <iostream>
 #include <cmath> 
+#include <filesystem>
 #include <numeric>
 
 class World {
@@ -22,6 +25,13 @@ public:
     float worldTime = 0.0f; 
 
     int selectedOrgId = -1;
+
+
+    // Autosave config
+    bool autosaveEnabled = true;
+    float autosaveIntervalSeconds = 60.0f; 
+    float timeSinceLastSave = 0.0f;
+    std::string worldSessionName = "vespers_garden";
 
 public:
     std::vector<std::unique_ptr<Organism>> population;
@@ -72,6 +82,15 @@ public:
         std::vector<std::unique_ptr<Organism>> babies;
         std::mutex babyMutex; 
 
+        // --- AUTOSAVE LOGIC ---
+        if (autosaveEnabled) {
+            timeSinceLastSave += dt;
+            if (timeSinceLastSave >= autosaveIntervalSeconds) {
+                // NEW: Logic for organized, non-destructive autosaving
+                saveWorldState("", true); 
+                timeSinceLastSave = 0.0f;
+            }
+        }
         // 1. REFRESH ORGANISM GRID (Sequential but fast)
         engine.clearOrgGrid();
         for (auto& org : population) {
@@ -204,4 +223,157 @@ public:
 
         population.push_back(std::make_unique<Organism>(nextOrgId++, wormDNA, config.startingEnergy, x, y));
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // ==========================================
+    // SAVE / LOAD LOGIC
+    // ==========================================
+
+
+
+    void loadWorldState(const std::string& filepath) {
+        std::ifstream file(filepath);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open save file: " << filepath << "\n";
+            return;
+        }
+
+        json jWorld;
+        file >> jWorld;
+
+        clearWorld(); // Wipe the current simulation
+
+        safe_get(jWorld, "worldTime", worldTime);
+        safe_get(jWorld, "nextOrgId", nextOrgId);
+
+        if (jWorld.contains("population")) {
+            for (const auto& jOrg : jWorld["population"]) {
+                int id = 0; float energy = config.startingEnergy, age = 0.0f, x = 0.0f, y = 0.0f;
+                Genome dna;
+
+                safe_get(jOrg, "id", id);
+                safe_get(jOrg, "energy", energy);
+                safe_get(jOrg, "age", age);
+                safe_get(jOrg, "x", x);
+                safe_get(jOrg, "y", y);
+                safe_get(jOrg, "dna", dna);
+
+                // Reconstruct the organism. The constructor will call buildPhenotype()
+                auto org = std::make_unique<Organism>(id, dna, energy, x, y);
+                org->age = age;
+                population.push_back(std::move(org));
+                
+                // Keep nextOrgId ahead of any loaded IDs to prevent collisions
+                if (id >= nextOrgId) nextOrgId = id + 1; 
+            }
+        }
+        std::cout << "[World] Loaded " << population.size() << " organisms.\n";
+    }
+
+    // Helper to generate a unique timestamp string
+    std::string getTimestamp() {
+        auto now = std::chrono::system_clock::now();
+        auto in_time_t = std::chrono::system_clock::to_time_t(now);
+        std::stringstream ss;
+        ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S");
+        return ss.str();
+    }
+
+    void saveWorldState(std::string customName = "", bool isAutosave = false) {
+        std::string folder = isAutosave ? "autosaves/" + worldSessionName : "saves/worlds";
+        std::filesystem::create_directories(folder);
+
+        std::string filename = customName.empty() ? "world_" + getTimestamp() + ".json" : customName;
+        std::string fullPath = folder + "/" + filename;
+
+
+        json jWorld;
+        jWorld["worldTime"] = worldTime;
+        jWorld["nextOrgId"] = nextOrgId;
+
+        json jPop = json::array();
+        for (const auto& org : population) {
+            if (!org->isAlive || org->markedForDeletion) continue;
+            
+            json jOrg;
+            jOrg["id"] = org->id;
+            jOrg["energy"] = org->energy;
+            jOrg["age"] = org->age;
+            // Save the center-mass/root node position to spawn them back in the right spot
+            jOrg["x"] = org->points.empty() ? 0.0f : org->points[0].x;
+            jOrg["y"] = org->points.empty() ? 0.0f : org->points[0].y;
+            jOrg["dna"] = org->dna;
+            
+            jPop.push_back(jOrg);
+        }
+        jWorld["population"] = jPop;
+
+
+        // Use fullPath for the std::ofstream
+        std::ofstream file(fullPath);
+        if (file.is_open()) {
+            file << std::setw(4) << jWorld << std::endl;
+            std::cout << "[World] Saved to: " << fullPath << "\n";
+        }
+    }
+
+    void exportOrganism(int targetId, std::string customName = "") {
+        std::filesystem::create_directories("saves/creatures");
+        
+        std::string filename = customName.empty() ? 
+            "org_" + std::to_string(targetId) + "_" + getTimestamp() + ".json" : customName;
+        std::string fullPath = "saves/creatures/" + filename;
+
+        for (const auto& org : population) {
+            if (org->id == targetId) {
+                json jOrg = org->dna;
+                std::ofstream file(fullPath);
+                if (file.is_open()) file << std::setw(4) << jOrg << std::endl;
+                return;
+            }
+        }
+    }
+
+    // Load an exported organism blueprint and spawn it into the current world
+    void importOrganism(const std::string& filepath, float x, float y) {
+        std::ifstream file(filepath);
+        if (!file.is_open()) return;
+
+        json jOrg;
+        file >> jOrg;
+
+        Genome dna = jOrg.get<Genome>();
+        population.push_back(std::make_unique<Organism>(nextOrgId++, dna, config.startingEnergy, x, y));
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 };

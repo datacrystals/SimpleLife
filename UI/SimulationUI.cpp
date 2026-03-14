@@ -29,7 +29,7 @@ void SimulationUI::Render(World& world) {
     ImGui::NewFrame();
 
     // Create the full-screen dockspace
-    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+    ImGui::DockSpaceOverViewport(ImGui::GetMainViewport(), 0);
 
     // Loop through and draw every registered window
     for (auto& window : windows) {
