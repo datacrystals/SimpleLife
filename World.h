@@ -119,6 +119,8 @@ public:
     
                 // Clone the genome
                 Genome childDNA = org->dna; 
+
+                childDNA.mutate(config);
     
                 // Spawn the baby slightly offset from the parent
                 float childX = org->points[0].x + 10.0f;
@@ -135,9 +137,20 @@ public:
         }
 
         // 2. Pure Physics Updates
+        std::vector<PhysicsPoint*> allPoints;
+
         for (auto& org : population) {
             engine.step(org->points, org->springs, dt);
+            
+            // Gather points for the spatial grid and assign IDs
+            for (auto& pt : org->points) {
+                pt.parentOrgId = org->id; 
+                allPoints.push_back(&pt);
+            }
         }
+
+        // 2.5 Resolve overlaps globally
+        engine.resolveGlobalCollisions(allPoints, 2.0f, 50.0f, dt);
 
         // 3. Introduce Babies to the World
         for (auto& baby : babies) {

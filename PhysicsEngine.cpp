@@ -104,3 +104,75 @@ void PhysicsEngine::step(std::vector<PhysicsPoint>& points, std::vector<PhysicsS
         }
     }
 }
+
+
+void PhysicsEngine::resolveGlobalCollisions(const std::vector<PhysicsPoint*>& allPoints, float collisionRadius, float repulsionStrength, float dt) {
+    if (allPoints.empty()) return;
+
+    // Cell size must be at least the max interaction distance to only check immediate neighbors
+    float cellSize = collisionRadius * 2.0f; 
+    int cols = std::ceil(worldWidth / cellSize);
+    int rows = std::ceil(worldHeight / cellSize);
+    
+    // 1D vector representing a 2D grid
+    std::vector<std::vector<PhysicsPoint*>> grid(cols * rows);
+
+    // 1. Populate the grid
+    for (auto* p : allPoints) {
+        // Safe modulo for floating point wrap-around
+        float wrappedX = std::fmod(p->x + worldWidth, worldWidth);
+        float wrappedY = std::fmod(p->y + worldHeight, worldHeight);
+        
+        int cx = static_cast<int>(wrappedX / cellSize) % cols;
+        int cy = static_cast<int>(wrappedY / cellSize) % rows;
+        
+        grid[cy * cols + cx].push_back(p);
+    }
+
+    float minDist = collisionRadius * 2.0f;
+    float minDistSq = minDist * minDist;
+
+    // 2. Check for collisions against neighboring cells
+    for (int y = 0; y < rows; ++y) {
+        for (int x = 0; x < cols; ++x) {
+            auto& cell = grid[y * cols + x];
+            if (cell.empty()) continue;
+            
+            // Check current cell and the 8 surrounding cells (Toroidal wrap applied)
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    int nx = (x + dx + cols) % cols;
+                    int ny = (y + dy + rows) % rows;
+                    auto& neighborCell = grid[ny * cols + nx];
+
+                    for (auto* p1 : cell) {
+                        for (auto* p2 : neighborCell) {
+                            // Skip if it's the exact same point or if they belong to the same organism
+                            if (p1 == p2 || p1->parentOrgId == p2->parentOrgId) continue;
+
+                            float diffX, diffY;
+                            getToroidalDiff(p1->x, p1->y, p2->x, p2->y, diffX, diffY);
+                            float distSq = diffX*diffX + diffY*diffY;
+
+                            if (distSq > 0.0001f && distSq < minDistSq) {
+                                float dist = std::sqrt(distSq);
+                                float overlap = minDist - dist;
+                                
+                                // Push points apart
+                                float pushX = (diffX / dist) * overlap * repulsionStrength * dt;
+                                float pushY = (diffY / dist) * overlap * repulsionStrength * dt;
+                                
+                                // Because we iterate twice over pairs in adjacent cells, 
+                                // we halve the push to avoid double-correcting.
+                                p1->x -= pushX * 0.5f;
+                                p1->y -= pushY * 0.5f;
+                                p2->x += pushX * 0.5f;
+                                p2->y += pushY * 0.5f;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

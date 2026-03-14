@@ -16,6 +16,7 @@ struct PhysicsPoint {
     float old_x, old_y;   // Previous position (used for Verlet velocity derivation)
     float ax, ay;         // Accumulated acceleration for the current frame
     float mass = 1.0f;    // Affects how much this point yields during constraint resolution
+    int parentOrgId = -1; // id of parent used to prevent self repulsion
 };
 
 /**

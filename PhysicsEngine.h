@@ -34,5 +34,10 @@ public:
      * @param dt The delta time step.
      */
     void step(std::vector<PhysicsPoint>& points, std::vector<PhysicsSpring>& springs, float dt);
+
+    /**
+     * @brief Resolves overlap between points using a spatial hash grid for performance.
+     */
+    void resolveGlobalCollisions(const std::vector<PhysicsPoint*>& allPoints, float collisionRadius, float repulsionStrength, float dt);
 };
  
