@@ -108,85 +108,80 @@ void PhysicsEngine::step(std::vector<PhysicsPoint>& points, std::vector<PhysicsS
 }
 
 
+#include <execution>
+#include <cmath>
+
 void PhysicsEngine::resolveGlobalCollisions(const std::vector<PhysicsPoint*>& allPoints, float collisionRadius, float repulsionStrength, float dt) {
     if (allPoints.empty()) return;
 
-    float cellSize = collisionRadius * 2.0f; 
-    int cols = std::ceil(worldWidth / cellSize);
-    int rows = std::ceil(worldHeight / cellSize);
+    // Cell size must be at least the max interaction distance to check only 1-ring neighbors
+    float cellSize = 20.0f;//std::max(collisionRadius, 2.0f); 
+    int cols = std::max(1, (int)std::ceil(worldWidth / cellSize));
+    int rows = std::max(1, (int)std::ceil(worldHeight / cellSize));
     
+    // 1. Populate the Read-Only Grid (Sequential, purely memory-bound)
     std::vector<std::vector<PhysicsPoint*>> grid(cols * rows);
-
-    // 1. Populate the grid (Sequential - this is purely memory bound and sub-millisecond)
     for (auto* p : allPoints) {
+        // Prevent NaNs from poisoning the spatial hash and causing Segfaults
+        if (std::isnan(p->x) || std::isnan(p->y)) continue;
+
         float wrappedX = std::fmod(p->x + worldWidth, worldWidth);
         float wrappedY = std::fmod(p->y + worldHeight, worldHeight);
+        if (wrappedX < 0.0f) wrappedX += worldWidth;
+        if (wrappedY < 0.0f) wrappedY += worldHeight;
         
-        int cx = static_cast<int>(wrappedX / cellSize) % cols;
-        int cy = static_cast<int>(wrappedY / cellSize) % rows;
+        // Bulletproof modulo to guarantee we never get a negative array index
+        int cx = ((static_cast<int>(wrappedX / cellSize) % cols) + cols) % cols;
+        int cy = ((static_cast<int>(wrappedY / cellSize) % rows) + rows) % rows;
         
         grid[cy * cols + cx].push_back(p);
     }
 
-    float minDist = collisionRadius * 2.0f;
-    float minDistSq = minDist * minDist;
+    float minDistSq = collisionRadius * collisionRadius;
 
-    // 2. Lock-Free Parallel Resolution via Spatial Partitioning
-    // We execute in 9 passes (3x3 grid offset). Because cell radius is 1, 
-    // processing every 3rd cell guarantees no two threads will ever 
-    // read or write to the same neighbor boundaries at the same time.
-    for (int passY = 0; passY < 3; ++passY) {
-        for (int passX = 0; passX < 3; ++passX) {
-            
-            // Gather all cells belonging to this independent pass
-            std::vector<int> independentCells;
-            for (int y = passY; y < rows; y += 3) {
-                for (int x = passX; x < cols; x += 3) {
-                    independentCells.push_back(y * cols + x);
-                }
-            }
+    // 2. 100% Core Saturation via Point-Level Parallelism
+    // Threads read from the shared grid but ONLY write to their assigned p1, guaranteeing no races.
+    std::for_each(std::execution::par, allPoints.begin(), allPoints.end(), [&](PhysicsPoint* p1) {
+        if (std::isnan(p1->x) || std::isnan(p1->y)) return;
 
-            // Process this set of non-overlapping cells entirely in parallel
-            std::for_each(std::execution::par, independentCells.begin(), independentCells.end(), [&](int cellIdx) {
-                int x = cellIdx % cols;
-                int y = cellIdx / cols;
-                auto& cell = grid[cellIdx];
-                if (cell.empty()) return;
-                
-                for (int dy = -1; dy <= 1; ++dy) {
-                    for (int dx = -1; dx <= 1; ++dx) {
-                        int nx = (x + dx + cols) % cols;
-                        int ny = (y + dy + rows) % rows;
-                        auto& neighborCell = grid[ny * cols + nx];
+        float wrappedX = std::fmod(p1->x + worldWidth, worldWidth);
+        float wrappedY = std::fmod(p1->y + worldHeight, worldHeight);
+        if (wrappedX < 0.0f) wrappedX += worldWidth;
+        if (wrappedY < 0.0f) wrappedY += worldHeight;
 
-                        for (auto* p1 : cell) {
-                            for (auto* p2 : neighborCell) {
-                                if (p1 == p2 || p1->parentOrgId == p2->parentOrgId) continue;
+        int cx = ((static_cast<int>(wrappedX / cellSize) % cols) + cols) % cols;
+        int cy = ((static_cast<int>(wrappedY / cellSize) % rows) + rows) % rows;
+        
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                int nx = ((cx + dx) % cols + cols) % cols;
+                int ny = ((cy + dy) % rows + rows) % rows;
+                auto& neighborCell = grid[ny * cols + nx];
 
-                                float diffX, diffY;
-                                getToroidalDiff(p1->x, p1->y, p2->x, p2->y, diffX, diffY);
-                                float distSq = diffX*diffX + diffY*diffY;
+                for (auto* p2 : neighborCell) {
+                    // Skip self and sibling nodes
+                    if (p1 == p2 || p1->parentOrgId == p2->parentOrgId) continue;
 
-                                if (distSq > 0.0001f && distSq < minDistSq) {
-                                    float dist = std::sqrt(distSq);
-                                    float overlap = minDist - dist;
-                                    
-                                    float pushX = (diffX / dist) * overlap * repulsionStrength * dt;
-                                    float pushY = (diffY / dist) * overlap * repulsionStrength * dt;
-                                    
-                                    // Completely safe concurrent writes because of the 3x3 stride
-                                    p1->x -= pushX * 0.5f;
-                                    p1->y -= pushY * 0.5f;
-                                    p2->x += pushX * 0.5f;
-                                    p2->y += pushY * 0.5f;
-                                }
-                            }
-                        }
+                    float diffX, diffY;
+                    getToroidalDiff(p1->x, p1->y, p2->x, p2->y, diffX, diffY);
+                    float distSq = diffX*diffX + diffY*diffY;
+
+                    if (distSq > 0.0001f && distSq < minDistSq) {
+                        float dist = std::sqrt(distSq);
+                        float overlap = collisionRadius - dist; // Fixed: No longer 2x radius
+                        
+                        // Prevent division by zero if points are perfectly stacked
+                        float safeDist = std::max(dist, 0.001f);
+                        
+                        // Apply force as stable ACCELERATION. Fixed: Removed the 10x explosion multiplier.
+                        float force = overlap * repulsionStrength; 
+                        p1->ax -= (diffX / safeDist) * force;
+                        p1->ay -= (diffY / safeDist) * force;
                     }
                 }
-            });
+            }
         }
-    }
+    });
 }
 
 

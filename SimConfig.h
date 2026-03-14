@@ -22,7 +22,7 @@ struct SimConfig {
 
     // --- Population Limits ---
     int maxPopulation = 2000;
-    float startingEnergy = 390.0f;
+    float startingEnergy = 10.0f;
     float reproductionEnergyThreshold = 300.0f;
     float reproductionEnergyCost = 200.0f;
     float reproductionCooldown = 15.0f;

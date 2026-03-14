@@ -11,13 +11,13 @@
 #include <mutex>
 #include <algorithm>
 #include <execution>
-#include <mutex>
 #include <cmath> 
+#include <numeric>
 
 class World {
 public:
     SimConfig config;
-    PhysicsEngine engine; // Namespace dropped!
+    PhysicsEngine engine; 
     int nextOrgId = 1;
     float worldTime = 0.0f; 
 
@@ -33,54 +33,37 @@ public:
         Genome edenDNA;
 
         // --- BONES (The Spine) ---
-        // Node 0 to 1 (Spine 1)
         edenDNA.morphology.push_back({ColorType::WHITE, 0, -1, 5.0f, 0.0f, false, -1, 0.0f});
-        // Node 1 to 2 (Spine 2)
         edenDNA.morphology.push_back({ColorType::WHITE, 1, -1, 5.0f, 0.0f, false, -1, 0.0f});
 
         // --- BONES (The Ribs) ---
-        // Node 1 to 3 (Top Rib)
         edenDNA.morphology.push_back({ColorType::WHITE, 1, -1, 3.0f, 90.0f, false, -1, 0.0f});
-        // Node 1 to 4 (Bottom Rib)
         edenDNA.morphology.push_back({ColorType::WHITE, 1, -1, 3.0f, -90.0f, false, -1, 0.0f});
-        // Node 2 to 5 (Top Rib 2)
         edenDNA.morphology.push_back({ColorType::WHITE, 2, -1, 3.0f, 90.0f, false, -1, 0.0f});
-        // Node 2 to 6 (Bottom Rib 2)
         edenDNA.morphology.push_back({ColorType::WHITE, 2, -1, 3.0f, -90.0f, false, -1, 0.0f});
 
-        // --- STRUCTURAL BRACES (Invisible scaffolding to stop the skeleton from folding) ---
-        // Cross-brace the top ribs to the opposite spine nodes
+        // --- STRUCTURAL BRACES ---
         edenDNA.morphology.push_back({ColorType::DEAD, 1, 5, 0.0f, 0.0f, false, -1, 0.0f}); 
         edenDNA.morphology.push_back({ColorType::DEAD, 2, 3, 0.0f, 0.0f, false, -1, 0.0f}); 
-        // Cross-brace the bottom ribs to the opposite spine nodes
         edenDNA.morphology.push_back({ColorType::DEAD, 1, 6, 0.0f, 0.0f, false, -1, 0.0f}); 
         edenDNA.morphology.push_back({ColorType::DEAD, 2, 4, 0.0f, 0.0f, false, -1, 0.0f});
 
         // --- MUSCLES ---
-        // Top Muscle (Driven by Motor Neuron ID 2)
         edenDNA.morphology.push_back({ColorType::YELLOW, 3, 5, 0.0f, 0.0f, true, 2, 0.0f});
-        // Bottom Muscle (Driven by Motor Neuron ID 3)
         edenDNA.morphology.push_back({ColorType::YELLOW, 4, 6, 0.0f, 0.0f, true, 3, 0.0f});
 
         // --- GREEN WHISKERS ---
-        // Attached to the ribs, hanging loosely
         edenDNA.morphology.push_back({ColorType::GREEN, 3, -1, 4.0f, 135.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::GREEN, 4, -1, 4.0f, -135.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::GREEN, 5, -1, 4.0f, 45.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::GREEN, 6, -1, 4.0f, -45.0f, false, -1, 0.0f});
 
         // --- SNN CONNECTOME ---
-        // N0: Sensory (Receives Sine Wave A)
         edenDNA.neurons.push_back({0, NeuronRole::SENSORY, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
-        // N1: Sensory (Receives Sine Wave B)
         edenDNA.neurons.push_back({1, NeuronRole::SENSORY, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
-        
-        // N2: Motor Top Muscle
         edenDNA.neurons.push_back({2, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.2f, 0.0f});
-        // N3: Motor Bottom Muscle
         edenDNA.neurons.push_back({3, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.2f, 0.0f});
 
-        // Synapses: Sensor A (0) drives Top Muscle (2), Sensor B (1) drives Bottom Muscle (3)
         edenDNA.synapses.push_back({0, 2, 1.5f}); 
         edenDNA.synapses.push_back({1, 3, 1.5f});
 
@@ -142,39 +125,41 @@ public:
             engine.step(org->points, org->springs, dt);
         });
 
-        // 2.5 Gather points for the spatial grid (MULTI-THREADED & LOCK-FREE)
+        // 2.5 Gather points for the spatial grid (100% LOCK-FREE, NO ATOMICS)
+        // Sequential offset calculation avoids cache coherency deadlocks
+        std::vector<size_t> offsets(population.size());
         size_t totalPoints = 0;
-        for (const auto& org : population) totalPoints += org->points.size(); 
+        for (size_t i = 0; i < population.size(); ++i) {
+            offsets[i] = totalPoints;
+            totalPoints += population[i]->points.size();
+        }
         
         std::vector<PhysicsPoint*> allPoints(totalPoints);
-        std::atomic<size_t> pointIdx{0};
+        std::vector<size_t> indices(population.size());
+        std::iota(indices.begin(), indices.end(), 0);
 
-        std::for_each(std::execution::par, population.begin(), population.end(), [&](auto& org) {
-            // Atomically reserve a block of indices for this thread's points
-            size_t localIdx = pointIdx.fetch_add(org->points.size());
-            for (auto& pt : org->points) {
-                pt.parentOrgId = org->id; 
-                allPoints[localIdx++] = &pt;
+        // Threads write to perfectly isolated array indices
+        std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i) {
+            size_t writeIdx = offsets[i];
+            for (auto& pt : population[i]->points) {
+                pt.parentOrgId = population[i]->id;
+                allPoints[writeIdx++] = &pt;
             }
         });
 
-        // 2.6 Resolve overlaps globally (NOW FULLY MULTI-THREADED INTERNALLY)
+        // 2.6 Resolve overlaps globally
         engine.resolveGlobalCollisions(allPoints, 2.0f, 50.0f, dt);
 
-        // 3. Introduce Babies to the World (SEQUENTIAL - modifying the primary vector)
+        // 3. Introduce Babies to the World (SEQUENTIAL)
         for (auto& baby : babies) {
             population.push_back(std::move(baby));
         }
 
-        // 4. Cleanup Dead Bodies (SEQUENTIAL - modifying the primary vector)
+        // 4. Cleanup Dead Bodies (SEQUENTIAL)
         population.erase(std::remove_if(population.begin(), population.end(), [](const std::unique_ptr<Organism>& org) {
             return org->markedForDeletion || (!org->isAlive && org->energy < -50.0f);
         }), population.end());
     }
-
-
-
-
 
     void clearWorld() {
         population.clear();
@@ -182,30 +167,20 @@ public:
 
     void spawnSimpleGreen(float x, float y) {
         Genome greenDNA;
-        // Just one green node
         greenDNA.morphology.push_back({ColorType::GREEN, 0, -1, 5.0f, 0.0f, false, -1, 0.0f});
-        
         population.push_back(std::make_unique<Organism>(nextOrgId++, greenDNA, config.startingEnergy, x, y));
     }
 
     void spawnWorm(float x, float y) {
         Genome wormDNA;
-        // A simple 3-segment squiggly worm
         wormDNA.morphology.push_back({ColorType::YELLOW, 0, -1, 4.0f, 0.0f, true, 0, 0.0f});
         wormDNA.morphology.push_back({ColorType::YELLOW, 1, -1, 4.0f, 0.0f, true, 1, 0.0f});
         wormDNA.morphology.push_back({ColorType::YELLOW, 2, -1, 4.0f, 0.0f, true, 2, 0.0f});
 
-        // Basic brain to make it wiggle
         wormDNA.neurons.push_back({0, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
         wormDNA.neurons.push_back({1, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
         wormDNA.neurons.push_back({2, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
 
         population.push_back(std::make_unique<Organism>(nextOrgId++, wormDNA, config.startingEnergy, x, y));
     }
-
-
-
-
 };
-
-

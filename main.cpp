@@ -10,27 +10,193 @@
 #include "World.h"
 #include <cmath>
 
+
+
+static std::vector<float> historySensory;
+static std::vector<float> historyHidden;
+static std::vector<float> historyMotor;
+static std::vector<float> historySpikes;
+static int selectedNeuronIndex = -1;
+static int selectedOrgIndex = 0;
+
+
+
+
+
 float camX = 100.0f, camY = 70.0f, camZoom = 100.0f, aspect = 1.0f;
 
-void drawJoint(float x, float y, bool isFlexible) {
+
+
+
+
+
+
+// Helper to identify what a sensory neuron is actually looking at
+std::string GetInputSourceName(const Organism& org, int neuronIdx) {
+    int nId = org.brain.neurons[neuronIdx].id;
+    for (const auto& gene : org.dna.morphology) {
+        if (gene.ioNeuronId == nId) {
+            if (gene.type == ColorType::GREEN) return "Photosyn-Sense";
+            if (gene.sensorRange > 0) return "Eye/Antenna";
+            return "Part-Stress";
+        }
+    }
+    // Default hardcoded inputs from World.h updateTick
+    if (neuronIdx == 0) return "Clock-Sin";
+    if (neuronIdx == 1) return "Clock-Cos";
+    return "Unknown Input";
+}
+
+void DrawLayeredTopology(ImDrawList* drawList, Organism& org, ImVec2 canvasPos, ImVec2 canvasSize) {
+    auto& brain = org.brain;
+    int n = (int)brain.neurons.size();
+    if (n == 0) return;
+
+    // 1. Layer Categorization
+    std::vector<int> sensory, hidden, motor;
+    for (int i = 0; i < n; i++) {
+        if (brain.neurons[i].role == NeuronRole::SENSORY) sensory.push_back(i);
+        else if (brain.neurons[i].role == NeuronRole::MOTOR) motor.push_back(i);
+        else hidden.push_back(i);
+    }
+
+    // 2. Position Mapping
+    std::vector<ImVec2> pos(n);
+    auto MapLayer = [&](const std::vector<int>& idxs, float xPct) {
+        for (size_t i = 0; i < idxs.size(); i++) {
+            float yPct = (idxs.size() > 1) ? (float)i / (idxs.size() - 1) : 0.5f;
+            pos[idxs[i]] = ImVec2(canvasPos.x + canvasSize.x * xPct, canvasPos.y + 50.0f + (canvasSize.y - 100.0f) * yPct);
+        }
+    };
+    MapLayer(sensory, 0.12f); MapLayer(hidden, 0.5f); MapLayer(motor, 0.88f);
+
+    // 3. Draw Synapses with Weight Labels
+    for (const auto& syn : brain.synapses) {
+        ImVec2 start = pos[syn.source_idx], end = pos[syn.target_idx];
+        bool isExc = (brain.neurons[syn.source_idx].polarity == NeuronPolarity::EXCITATORY);
+        ImU32 col = isExc ? IM_COL32(255, 255, 100, 120) : IM_COL32(100, 150, 255, 120);
+        
+        drawList->AddLine(start, end, col, std::clamp(std::abs(syn.weight), 0.5f, 4.0f));
+        
+        // Mid-point weight label
+        ImVec2 mid = ImVec2((start.x + end.x) * 0.5f, (start.y + end.y) * 0.5f);
+        drawList->AddText(mid, IM_COL32(200, 200, 200, 180), std::to_string((int)syn.weight).c_str());
+    }
+
+    // 4. Draw Neurons & Interaction
+    ImVec2 mPos = ImGui::GetMousePos();
+    for (int i = 0; i < n; i++) {
+        auto& node = brain.neurons[i];
+        
+        // Special Roles: Green (In), Red (Out), Yellow/Blue (Hidden)
+        ImU32 col = (node.role == NeuronRole::SENSORY) ? IM_COL32(0, 255, 0, 255) :
+                    (node.role == NeuronRole::MOTOR)   ? IM_COL32(255, 0, 0, 255) :
+                    (node.polarity == NeuronPolarity::EXCITATORY) ? IM_COL32(255, 255, 0, 255) : IM_COL32(0, 150, 255, 255);
+
+        if (node.spikedThisTick) col = IM_COL32(255, 255, 255, 255);
+        
+        // Hit-test for selection
+        if (ImGui::IsMouseClicked(0) && std::hypot(mPos.x - pos[i].x, mPos.y - pos[i].y) < 15.0f) 
+            selectedNeuronIndex = i;
+
+        drawList->AddCircleFilled(pos[i], (i == selectedNeuronIndex ? 12.0f : 8.0f), col);
+        
+        // Restore Labels
+        if (node.role != NeuronRole::HIDDEN) {
+             std::string label = (node.role == NeuronRole::SENSORY) ? GetInputSourceName(org, i) : "Muscle";
+             drawList->AddText(ImVec2(pos[i].x - 20, pos[i].y - 25), IM_COL32(255, 255, 255, 200), label.c_str());
+        }
+    }
+}
+
+void RenderBrainMonitor(World& world) {
+    ImGui::Begin("Brain Monitor");
+
+    if (world.population.empty()) {
+        ImGui::TextColored(ImVec4(1, 0, 0, 1), "POPULATION EXTINCT");
+        ImGui::End();
+        return;
+    }
+
+    // --- Subject Selector ---
+    if (selectedOrgIndex >= (int)world.population.size()) selectedOrgIndex = 0;
+    auto& org = world.population[selectedOrgIndex];
+    
+    if (ImGui::BeginCombo("Select Org", ("ID: " + std::to_string(org->id)).c_str())) {
+        for (int i = 0; i < (int)world.population.size(); i++) {
+            if (ImGui::Selectable(("ID: " + std::to_string(world.population[i]->id)).c_str(), selectedOrgIndex == i))
+                selectedOrgIndex = i;
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::Columns(2, "MonitorSplit", true);
+
+    // --- Left: Network View ---
+    ImGui::Text("Network Topology");
+    ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+    ImVec2 canvasSize = ImVec2(ImGui::GetContentRegionAvail().x, 400);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(canvasPos, ImVec2(canvasPos.x + canvasSize.x, canvasPos.y + canvasSize.y), IM_COL32(20, 20, 25, 255));
+    
+    DrawLayeredTopology(dl, *org, canvasPos, canvasSize); // Fixed dereference
+    ImGui::Dummy(canvasSize);
+
+    ImGui::NextColumn();
+
+    // --- Right: High-Density Graphs ---
+    ImGui::Text("Live Neural Data");
+    
+    // Auto-update history (Simplified version of your history logic)
+    static std::vector<float> voltHistory;
+    float currentAvgVolt = 0;
+    for(auto& n : org->brain.neurons) currentAvgVolt += n.membranePotential;
+    voltHistory.push_back(currentAvgVolt / std::max(1, (int)org->brain.neurons.size()));
+    if(voltHistory.size() > 100) voltHistory.erase(voltHistory.begin());
+
+    ImGui::PlotLines("##volts", voltHistory.data(), voltHistory.size(), 0, "Avg Potential", 0.0f, 1.2f, ImVec2(0, 80));
+    
+    ImGui::Separator();
+    
+    if (selectedNeuronIndex != -1 && selectedNeuronIndex < (int)org->brain.neurons.size()) {
+        auto& sn = org->brain.neurons[selectedNeuronIndex];
+        ImGui::Text("Neuron %d [Role: %d]", selectedNeuronIndex, (int)sn.role);
+        ImGui::Value("Potential", sn.membranePotential);
+        ImGui::Value("Threshold", sn.threshold);
+        ImGui::ProgressBar(sn.membranePotential / sn.threshold, ImVec2(-1, 0));
+    } else {
+        ImGui::TextDisabled("Click a neuron to inspect.");
+    }
+
+    ImGui::Columns(1);
+    ImGui::End();
+}
+
+
+
+
+void drawJoint(float x, float y, float size, bool isFlexible) {
     if (isFlexible) {
         // Blue Circle
         glColor3f(0.2f, 0.4f, 1.0f);
         glBegin(GL_TRIANGLE_FAN);
         glVertex2f(x, y);
         for (int i = 0; i <= 12; i++) {
+            // Fixing syntax error: i * 3.14159f * 2.0f / 12.0f
             float angle = i * 3.14159f * 2.0f / 12.0f;
-            glVertex2f(x + cos(angle)*1.2f, y + sin(angle)*1.2f);
+            // Using 'size' instead of 1.2f
+            glVertex2f(x + cos(angle) * size, y + sin(angle) * size);
         }
         glEnd();
     } else {
         // Purple Square
         glColor3f(0.6f, 0.2f, 0.8f);
         glBegin(GL_QUADS);
-        glVertex2f(x - 1.0f, y - 1.0f);
-        glVertex2f(x + 1.0f, y - 1.0f);
-        glVertex2f(x + 1.0f, y + 1.0f);
-        glVertex2f(x - 1.0f, y + 1.0f);
+        // Using 'size' instead of 1.0f (half-width)
+        glVertex2f(x - size, y - size);
+        glVertex2f(x + size, y - size);
+        glVertex2f(x + size, y + size);
+        glVertex2f(x - size, y + size);
         glEnd();
     }
 }
@@ -96,7 +262,7 @@ void renderWorld(World& world) {
         // 3. Draw Joints
         if (org->isAlive) {
             for (size_t i = 0; i < org->points.size(); ++i) {
-                drawJoint(org->points[i].x, org->points[i].y, flexibleJoints[i]);
+                drawJoint(org->points[i].x, org->points[i].y, 0.3f, flexibleJoints[i]);
             }
         }
     }
@@ -206,24 +372,7 @@ int main() {
 
         ImGui::End();
 
-        ImGui::Begin("Brain Monitor (Org 0)");
-        if (!world.population.empty()) {
-            auto& org = world.population[0];
-            ImGui::Text("Energy: %.1f", org->energy);
-            ImGui::Separator();
-            for (size_t i = 0; i < org->brain.neurons.size(); i++) {
-                auto& n = org->brain.neurons[i];
-                ImGui::Text("N%d (%s): %.2f / %.2f %s", 
-                    n.id, 
-                    n.role == NeuronRole::SENSORY ? "Sensory" : (n.role == NeuronRole::MOTOR ? "Motor" : "Hidden"),
-                    n.membranePotential, 
-                    n.threshold,
-                    n.spikedThisTick ? " *SPIKE*" : "");
-            }
-        } else {
-            ImGui::Text("Extinction.");
-        }
-        ImGui::End();
+        RenderBrainMonitor(world);
 
         // Camera Controls
         if (ImGui::IsKeyDown(ImGuiKey_W)) camY += camZoom * 0.03f;
