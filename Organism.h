@@ -14,7 +14,9 @@ struct BodyPart {
     ColorType type;
     bool isMuscle;
     float baseLength;
-    int motorNeuronIndex; // Direct index into the motor spikes array for fast runtime access
+    int ioNeuronIndex;    // Direct index into the SNN arrays for fast runtime access
+    float sensorRange;
+    float currentTension; // For visualizing muscle contraction
 };
 
 class Organism {
@@ -47,20 +49,22 @@ public:
      * @brief Translates the DNA into physical points, constraints, and an SNN.
      */
     void buildPhenotype(float startX, float startY) {
-        points.push_back({startX, startY, startX, startY, 0, 0, 1.0f}); // Node 0
+        // 1. Build Physical Body
+        points.push_back({startX, startY, startX, startY, 0, 0, 1.0f}); // Root node
+        
         std::vector<int> geneToPointMap;
         geneToPointMap.push_back(0); // Map Gene 0 to Node 0
-    
+
         for (size_t i = 0; i < dna.morphology.size(); ++i) {
             const auto& mGene = dna.morphology[i];
             
             int p1_idx = (mGene.p1_geneIndex >= 0 && mGene.p1_geneIndex < geneToPointMap.size()) 
                          ? geneToPointMap[mGene.p1_geneIndex] : 0;
-    
+
             int p2_idx = -1;
-    
+
             if (mGene.p2_geneIndex >= 0 && mGene.p2_geneIndex < geneToPointMap.size()) {
-                // Connect to an existing node (Creates a loop, truss, or muscle across a joint)
+                // Connect to an existing node
                 p2_idx = geneToPointMap[mGene.p2_geneIndex];
             } else {
                 // Create a brand new node extending out
@@ -70,38 +74,55 @@ public:
                 points.push_back({nx, ny, nx, ny, 0, 0, 1.0f});
                 p2_idx = points.size() - 1;
             }
-    
+
             geneToPointMap.push_back(p2_idx);
-    
-            // Map SNN Motor ID
-            int localMotorIdx = -1;
-            if (mGene.isMuscle) {
+
+            // Map the SNN IO ID to a local index we can use quickly at runtime
+            int localIoIdx = -1;
+            if (mGene.isMuscle || mGene.type == ColorType::RED) {
                 for (size_t m = 0; m < dna.neurons.size(); ++m) {
-                    if (dna.neurons[m].role == NeuronRole::MOTOR && dna.neurons[m].id == mGene.motorNeuronId) {
-                        localMotorIdx = m; break;
+                    if (dna.neurons[m].role == NeuronRole::MOTOR && dna.neurons[m].id == mGene.ioNeuronId) {
+                        localIoIdx = m; 
+                        break;
+                    }
+                }
+            } else if (mGene.sensorRange > 0.0f) {
+                for (size_t m = 0; m < dna.neurons.size(); ++m) {
+                    if (dna.neurons[m].role == NeuronRole::SENSORY && dna.neurons[m].id == mGene.ioNeuronId) {
+                        localIoIdx = m; 
+                        break;
                     }
                 }
             }
-    
+
             // Calculate actual resting length based on geometry
             float dx = points[p2_idx].x - points[p1_idx].x;
             float dy = points[p2_idx].y - points[p1_idx].y;
             float actualLength = std::sqrt(dx*dx + dy*dy);
-    
+
             springs.push_back({p1_idx, p2_idx, actualLength, mGene.isMuscle ? 0.3f : 1.0f});
-            bodyParts.push_back({mGene.type, mGene.isMuscle, actualLength, localMotorIdx});
+            bodyParts.push_back({mGene.type, mGene.isMuscle, actualLength, localIoIdx, mGene.sensorRange, 0.0f});
         }
 
         // 2. Build SNN Brain
         for (size_t i = 0; i < dna.neurons.size(); ++i) {
             const auto& nGene = dna.neurons[i];
-            brain.neurons.push_back({nGene.id, nGene.role, nGene.polarity, nGene.threshold, nGene.leakRate, nGene.restPotential});
+            
+            LIFNeuron n;
+            n.id = nGene.id;
+            n.role = nGene.role;
+            n.polarity = nGene.polarity;
+            n.threshold = nGene.threshold;
+            n.leakRate = nGene.leakRate;
+            n.restPotential = nGene.restPotential;
+            
+            brain.neurons.push_back(n);
+
             if (nGene.role == NeuronRole::SENSORY) brain.sensoryIndices.push_back(i);
             if (nGene.role == NeuronRole::MOTOR) brain.motorIndices.push_back(i);
         }
 
         for (const auto& sGene : dna.synapses) {
-            // Find local vector indices from genetic IDs
             int srcIdx = -1, tgtIdx = -1;
             for (size_t i = 0; i < brain.neurons.size(); ++i) {
                 if (brain.neurons[i].id == sGene.sourceId) srcIdx = i;
@@ -116,38 +137,47 @@ public:
     /**
      * @brief Reads motor spikes and actuates muscles via physics target_lengths.
      */
-    void updateBiology(float dt) {
+    void updateBiology(float dt, const SimConfig& cfg) {
         if (!isAlive) return;
         
         age += dt;
         if (reproCooldown > 0) reproCooldown -= dt;
 
-        // Run the SNN
         brain.tick(dt);
         auto motorSpikes = brain.getMotorSpikes();
 
-        // Translate Spikes to Muscle Contractions
-        for (size_t i = 0; i < springs.size(); ++i) {
-            if (bodyParts[i].isMuscle && bodyParts[i].motorNeuronIndex != -1) {
-                // Determine which motor spike controls this muscle
-                bool spiked = false;
-                if (bodyParts[i].motorNeuronIndex < motorSpikes.size()) {
-                    spiked = motorSpikes[bodyParts[i].motorNeuronIndex];
-                }
+        float netEnergy = 0.0f;
 
-                if (spiked) {
-                    // Contract muscle (shrink target length)
-                    springs[i].target_length = bodyParts[i].baseLength * 0.5f; 
-                    energy -= 0.05f * dt; // Cost of flexing
-                } else {
-                    // Relax back to base length gradually
-                    springs[i].target_length += (bodyParts[i].baseLength - springs[i].target_length) * 5.0f * dt;
+        for (size_t i = 0; i < springs.size(); ++i) {
+            // 1. Photosynthesis Gain
+            if (bodyParts[i].type == ColorType::GREEN) {
+                netEnergy += cfg.photosynthesisRate * bodyParts[i].baseLength * dt;
+            }
+
+            // 2. Muscle Contraction & Cost
+            // Translate Spikes to Muscle Contractions
+            for (size_t i = 0; i < springs.size(); ++i) {
+                if (bodyParts[i].isMuscle && bodyParts[i].ioNeuronIndex != -1) {
+                    
+                    // Read directly from the main brain array! No more bounds mismatches.
+                    bool spiked = brain.neurons[bodyParts[i].ioNeuronIndex].spikedThisTick;
+
+                    if (spiked) {
+                        springs[i].target_length = bodyParts[i].baseLength * 0.5f; 
+                        netEnergy -= cfg.movementCost * dt; // Cost to flex
+                        bodyParts[i].currentTension = 1.0f;
+                    } else {
+                        springs[i].target_length += (bodyParts[i].baseLength - springs[i].target_length) * 5.0f * dt;
+                        bodyParts[i].currentTension *= 0.9f;
+                    }
                 }
             }
         }
         
-        // Passive energy drain
-        energy -= bodyParts.size() * 0.01f * dt; 
-        if (energy <= 0.0f) isAlive = false;
+        // 3. Passive structural drain
+        netEnergy -= bodyParts.size() * cfg.segmentCost * dt; 
+        
+        energy += netEnergy;
+        if (energy <= cfg.deathEnergyThreshold) isAlive = false;
     }
 };

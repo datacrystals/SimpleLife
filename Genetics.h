@@ -10,14 +10,14 @@ enum class ColorType { GREEN, RED, PURPLE, BLUE, YELLOW, WHITE, DEAD };
 
 struct MorphologyGene {
     ColorType type;
-    int p1_geneIndex; // Which previous node to attach to
-    int p2_geneIndex; // If -1, creates a NEW node at 'length' and 'angle'. 
-                      // If >= 0, connects to an EXISTING node (forming trusses/muscles).
+    int p1_geneIndex;
+    int p2_geneIndex; // -1 if creating a new node
     float length;
-    float branchAngle; 
+    float branchAngle; // Used if p2_geneIndex is -1
     
     bool isMuscle;
-    int motorNeuronId;
+    int ioNeuronId;    // Motor ID for muscles/damage, Sensory ID for eyes/antennae
+    float sensorRange; // For vision/raycasts
 };
 
 struct NeuronGene {
