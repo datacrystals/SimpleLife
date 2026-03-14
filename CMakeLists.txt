@@ -3,13 +3,22 @@ cmake_minimum_required(VERSION 3.18)
 project(ALifeGarden)
 
 set(CMAKE_CXX_STANDARD 17)
-
-find_package(OpenGL REQUIRED)
-find_package(glfw3 REQUIRED)
-find_package(TBB REQUIRED) 
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 
+# Fetch GLFW from source
+FetchContent_Declare(
+    glfw
+    GIT_REPOSITORY https://github.com/glfw/glfw.git
+    GIT_TAG 3.3.8
+)
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(glfw)
+
+# Fetch ImGui from source
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -33,4 +42,20 @@ target_include_directories(garden PRIVATE
     ${imgui_SOURCE_DIR}/backends
 )
 
-target_link_libraries(garden PRIVATE OpenGL::GL glfw TBB::tbb)
+# Cross-platform Linking
+# Pthreads is required for std::thread on Linux/MinGW
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+if(WIN32)
+    # Windows native
+    target_link_libraries(garden PRIVATE opengl32 glfw Threads::Threads)
+    
+    # Statically link MinGW standard libraries
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_link_options(garden PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+else()
+    # Linux native
+    find_package(OpenGL REQUIRED) 
+    target_link_libraries(garden PRIVATE OpenGL::GL glfw Threads::Threads)
+endif()
