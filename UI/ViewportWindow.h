@@ -38,6 +38,21 @@ private:
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
+    void drawCrosshair(float worldX, float worldY, float zoom) {
+        float size = 2.0f * (zoom / 100.0f); // Size scales with zoom
+        glLineWidth(1.0f);
+        glColor4f(1.0f, 1.0f, 1.0f, 0.5f); // Semi-transparent white
+    
+        glBegin(GL_LINES);
+        // Horizontal line
+        glVertex2f(worldX - size, worldY);
+        glVertex2f(worldX + size, worldY);
+        // Vertical line
+        glVertex2f(worldX, worldY - size);
+        glVertex2f(worldX, worldY + size);
+        glEnd();
+    }
+
     void drawJoint(float x, float y, float size, bool isFlexible) {
         if (isFlexible) {
             glColor3f(0.2f, 0.4f, 1.0f);
@@ -117,6 +132,17 @@ private:
                     drawJoint(org->points[i].x, org->points[i].y, 0.3f, flexibleJoints[i]);
                 }
             }
+
+            if (org->id == world.selectedOrgId) {
+                glColor3f(1.0f, 1.0f, 1.0f); // White highlight
+                glLineWidth(2.0f);
+                glBegin(GL_LINE_LOOP);
+                for(int i=0; i<16; i++) {
+                    float a = i * (6.28f / 16.0f);
+                    glVertex2f(org->points[0].x + cos(a)*5.0f, org->points[0].y + sin(a)*5.0f);
+                }
+                glEnd();
+            }
         }
     }
 
@@ -132,7 +158,20 @@ public:
         }
 
         ImVec2 viewportSize = ImGui::GetContentRegionAvail();
+        ImVec2 contentPos = ImGui::GetCursorScreenPos();
         resizeFBO((int)viewportSize.x, (int)viewportSize.y);
+
+        // --- CALCULATE WORLD MOUSE POSITION ---
+        ImVec2 mousePos = ImGui::GetMousePos();
+        float localX = mousePos.x - contentPos.x;
+        float localY = mousePos.y - contentPos.y;
+
+        float ndcX = (localX / viewportSize.x) * 2.0f - 1.0f;
+        float ndcY = 1.0f - (localY / viewportSize.y) * 2.0f;
+
+        float aspect = (float)fboWidth / (float)fboHeight;
+        float worldMouseX = camX + (ndcX * camZoom * aspect);
+        float worldMouseY = camY + (ndcY * camZoom);
 
         if (fbo != 0) {
             glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -140,7 +179,6 @@ public:
             glClearColor(0.05f, 0.1f, 0.15f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
-            float aspect = (float)fboWidth / (float)fboHeight;
             glMatrixMode(GL_PROJECTION); 
             glLoadIdentity();
             glOrtho(camX - camZoom * aspect, camX + camZoom * aspect, camY - camZoom, camY + camZoom, -1.0, 1.0);
@@ -148,9 +186,10 @@ public:
 
             renderWorldGL(world);
             
+            // Draw the crosshair in world space
+            drawCrosshair(worldMouseX, worldMouseY, camZoom);
+
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            
-            // Render the FBO texture into ImGui
             ImGui::Image((void*)(intptr_t)texture, viewportSize, ImVec2(0, 1), ImVec2(1, 0));
         }
 
@@ -162,6 +201,25 @@ public:
             if (ImGui::IsKeyDown(ImGuiKey_D)) camX += camZoom * 0.03f;
             if (ImGui::IsKeyDown(ImGuiKey_E)) camZoom *= 1.02f;
             if (ImGui::IsKeyDown(ImGuiKey_Q)) camZoom *= 0.98f;
+
+
+
+            
+            // Selection logic (Reuse the worldMouseX/Y calculated above)
+            if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
+                float selectionThreshold = 5.0f * (camZoom / 100.0f);
+                int foundId = -1;
+                for (const auto& org : world.population) {
+                    float dx = org->points[0].x - worldMouseX;
+                    float dy = org->points[0].y - worldMouseY;
+                    if (std::sqrt(dx*dx + dy*dy) < selectionThreshold) {
+                        foundId = org->id;
+                        break;
+                    }
+                }
+                world.selectedOrgId = foundId;
+            }
+
         }
 
         ImGui::End();

@@ -21,6 +21,8 @@ public:
     int nextOrgId = 1;
     float worldTime = 0.0f; 
 
+    int selectedOrgId = -1;
+
 public:
     std::vector<std::unique_ptr<Organism>> population;
 

@@ -88,6 +88,17 @@ public:
             ImGui::End();
             return;
         }
+    
+        // --- Auto-Sync Selection ---
+        if (world.selectedOrgId != -1) {
+            // Find the index of the organism with this ID
+            for (int i = 0; i < (int)world.population.size(); i++) {
+                if (world.population[i]->id == world.selectedOrgId) {
+                    selectedOrgIndex = i;
+                    break;
+                }
+            }
+        }
 
         if (world.population.empty()) {
             ImGui::TextColored(ImVec4(1, 0, 0, 1), "POPULATION EXTINCT");

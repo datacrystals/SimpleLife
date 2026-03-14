@@ -27,9 +27,10 @@ set(IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
-add_executable(garden main.cpp PhysicsEngine.cpp Brain.cpp SimulationUI.cpp ${IMGUI_SOURCES})
+add_executable(garden main.cpp PhysicsEngine.cpp Brain.cpp UI/SimulationUI.cpp ${IMGUI_SOURCES})
 
 target_include_directories(garden PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${imgui_SOURCE_DIR} 
     ${imgui_SOURCE_DIR}/backends
 )
