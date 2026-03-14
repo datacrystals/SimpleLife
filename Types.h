@@ -35,7 +35,7 @@ struct Gene {
 
 struct Genome {
     std::vector<Gene> genes;
-    float lifespan = 40.0f;
+    float lifespan = 80.0f;
     int symmetry = 1; 
 };
 

@@ -4,6 +4,7 @@
  */
 
 #include "PhysicsEngine.h"
+#include "Organism.h"
 #include <cmath>
 #include <execution>
 #include <vector>
@@ -53,8 +54,17 @@ std::vector<Organism*> PhysicsEngine::getNearbyOrganisms(float x, float y, float
         for (int dx = -1; dx <= 1; ++dx) {
             int nx = (cx + dx + orgCols) % orgCols;
             int ny = (cy + dy + orgRows) % orgRows;
+            
             for (auto* other : orgGrid[ny * orgCols + nx]) {
-                found.push_back(other);
+                // THE FIX: Actually calculate the distance!
+                // We check against the other organism's root node (point 0)
+                float diffX, diffY;
+                getToroidalDiff(x, y, other->points[0].x, other->points[0].y, diffX, diffY);
+                
+                // Only add them if they are actually inside the bite radius
+                if ((diffX * diffX + diffY * diffY) <= rSq) {
+                    found.push_back(other);
+                }
             }
         }
     }

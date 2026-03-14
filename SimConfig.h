@@ -7,9 +7,9 @@
 
 struct SimConfig {
     // --- Environment & Spatial ---
-    float worldWidth = 200.0f;
-    float worldHeight = 140.0f;
-    float spatialGridSize = 19.0f;
+    float worldWidth = 400.0f;
+    float worldHeight = 300.0f;
+    float spatialGridSize = 15.0f;
     float timeScale = 1.0f;
     float physicsDt = 1.0f / 60.0f;
     

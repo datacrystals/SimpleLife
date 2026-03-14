@@ -13,6 +13,28 @@ private:
 
     float camX = 100.0f, camY = 70.0f, camZoom = 100.0f;
 
+    float gridSpacing = 20.0f;
+
+    // Helper to draw the world grid
+    void drawGrid(float worldWidth, float worldHeight) {
+        glLineWidth(1.0f);
+        glColor4f(0.2f, 0.25f, 0.3f, 0.5f); // Subdued grid color
+
+        glBegin(GL_LINES);
+        // Vertical lines
+        for (float x = 0; x <= worldWidth; x += gridSpacing) {
+            glVertex2f(x, 0);
+            glVertex2f(x, worldHeight);
+        }
+        // Horizontal lines
+        for (float y = 0; y <= worldHeight; y += gridSpacing) {
+            glVertex2f(0, y);
+            glVertex2f(worldWidth, y);
+        }
+        glEnd();
+    }
+
+
     void resizeFBO(int width, int height) {
         if (width <= 0 || height <= 0) return;
         if (width == fboWidth && height == fboHeight) return;
@@ -78,6 +100,8 @@ private:
         float ww = world.getConfig().worldWidth;
         float wh = world.getConfig().worldHeight;
     
+        drawGrid(ww, wh);
+
         // --- Draw World Border ---
         glLineWidth(2.0f);
         glColor3f(0.4f, 0.4f, 0.5f); // Subdued blue-grey for the border
@@ -224,6 +248,29 @@ public:
 
         // Camera Input (Only if mouse is hovering over the viewport)
         if (ImGui::IsWindowHovered()) {
+            ImGuiIO& io = ImGui::GetIO();
+
+            // 1. Zoom with Scroll Wheel
+            if (io.MouseWheel != 0.0f) {
+                float zoomFactor = (io.MouseWheel > 0) ? 0.9f : 1.1f;
+                camZoom *= zoomFactor;
+                // Clamp zoom to prevent flipping or infinite distance
+                if (camZoom < 1.0f) camZoom = 1.0f;
+                if (camZoom > 2000.0f) camZoom = 2000.0f;
+            }
+
+            // 2. Pan with Right or Middle Click Drag
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Right) || ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
+                ImVec2 delta = io.MouseDelta;
+                float aspect = (float)fboWidth / (float)fboHeight;
+                
+                // Map screen pixels to world units
+                // We divide by viewport size and multiply by camZoom to scale movement
+                camX -= (delta.x / viewportSize.x) * (camZoom * aspect * 2.0f);
+                camY += (delta.y / viewportSize.y) * (camZoom * 2.0f);
+            }
+
+
             if (ImGui::IsKeyDown(ImGuiKey_W)) camY += camZoom * 0.03f;
             if (ImGui::IsKeyDown(ImGuiKey_S)) camY -= camZoom * 0.03f;
             if (ImGui::IsKeyDown(ImGuiKey_A)) camX -= camZoom * 0.03f;

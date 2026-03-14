@@ -131,7 +131,16 @@ public:
                 if (brain.neurons[i].id == sGene.targetId) tgtIdx = i;
             }
             if (srcIdx != -1 && tgtIdx != -1) {
-                brain.synapses.push_back({srcIdx, tgtIdx, sGene.weight});
+                // Calculate physical Euclidean distance
+                float dx = brain.neurons[srcIdx].x - brain.neurons[tgtIdx].x;
+                float dy = brain.neurons[srcIdx].y - brain.neurons[tgtIdx].y;
+                float dist = std::sqrt(dx*dx + dy*dy);
+                
+                // Define how fast signals travel (Adjust this scaler to tune the physics)
+                float signalSpeed = 5.0f; 
+                float calculatedDelay = dist / signalSpeed;
+
+                brain.synapses.push_back({srcIdx, tgtIdx, sGene.weight, calculatedDelay});
             }
         }
     }
@@ -185,8 +194,10 @@ public:
         float baseMetabolism = (totalSegments * cfg.segmentCost);
         netEnergy -= (baseMetabolism) * dt; 
         
-        // Age penalty: Ensures turnover so evolution can happen.
-        netEnergy -= (age * 0.02f) * dt;
+        // // Age penalty: Ensures turnover so evolution can happen.
+        // float maxAgePenalty = 5.0f; 
+        // float agePenalty = std::min(age * 0.02f, maxAgePenalty);
+        // netEnergy -= agePenalty * dt;
         
         energy += netEnergy;
         if (energy <= cfg.deathEnergyThreshold) isAlive = false;

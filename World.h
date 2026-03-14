@@ -54,63 +54,7 @@ public:
         edenDNA.morphology.push_back({ColorType::GREEN, 5, -1, 4.0f, 45.0f, false, -1, 0.0f});
         edenDNA.morphology.push_back({ColorType::GREEN, 6, -1, 4.0f, -45.0f, false, -1, 0.0f});
     
-        // --- 2. SPATIAL SNN CONNECTOME ---
-        int totalNeurons = 100;
-        int sensoryCount = 15;
-        int motorCount = 15;
-        
-        int sIdx = 0; 
-        int mIdx = 0;
-
-        for (int i = 0; i < totalNeurons; ++i) {
-            NeuronGene n;
-            n.id = i;
-            
-            // 1. Role Assignment (Preserving Eden's specific motor hooks)
-            if (i == 0 || i == 1) n.role = NeuronRole::SENSORY; 
-            else if (i == 2 || i == 3) n.role = NeuronRole::MOTOR;
-            else if (i < sensoryCount) n.role = NeuronRole::SENSORY;
-            else if (i < sensoryCount + motorCount) n.role = NeuronRole::MOTOR;
-            else n.role = NeuronRole::HIDDEN;
-
-            // 2. Spatial Coordinate Assignment
-            if (n.role == NeuronRole::SENSORY) {
-                n.x = 0.05f; // Hard left vertical line
-                n.y = static_cast<float>(sIdx++) / std::max(1, sensoryCount - 1);
-            } else if (n.role == NeuronRole::MOTOR) {
-                n.x = 0.95f; // Hard right vertical line
-                n.y = static_cast<float>(mIdx++) / std::max(1, motorCount - 1);
-            } else {
-                // The "Goo" in the middle (spread between x = 0.2 and 0.8)
-                n.x = 0.2f + (static_cast<float>(rand()) / RAND_MAX) * 0.6f;
-                n.y = static_cast<float>(rand()) / RAND_MAX; // Full vertical spread
-            }
-
-            // Dale's Principle: Mix of Excitatory/Inhibitory
-            n.polarity = (rand() % 10 < 8) ? NeuronPolarity::EXCITATORY : NeuronPolarity::INHIBITORY;
-            n.threshold = 1.0f;
-            n.leakRate = 0.1f;
-            n.restPotential = 0.0f;
-            edenDNA.neurons.push_back(n);
-        }
-    
-        // --- 3. PROXIMITY-BASED SYNAPSES ---
-        //
-        for (size_t i = 0; i < edenDNA.neurons.size(); ++i) {
-            for (size_t j = 0; j < edenDNA.neurons.size(); ++j) {
-                if (i == j) continue;
-                
-                float dx = edenDNA.neurons[i].x - edenDNA.neurons[j].x;
-                float dy = edenDNA.neurons[i].y - edenDNA.neurons[j].y;
-                float dist = std::sqrt(dx*dx + dy*dy);
-    
-                // Connect if close (Local clusters)
-                if (dist < 0.25f && (static_cast<float>(rand()) / RAND_MAX) < 0.4f) {
-                    float weight = (static_cast<float>(rand()) / RAND_MAX) * 2.5f; 
-                    edenDNA.synapses.push_back({edenDNA.neurons[i].id, edenDNA.neurons[j].id, weight});
-                }
-            }
-        }
+        edenDNA.initializeBaseBrain();
     
         // --- 4. POPULATION SPAWN ---
         //
@@ -140,7 +84,7 @@ public:
 
             // Density for "Shade" penalty
             float density = engine.getNearbyCount(org->points[0].x, org->points[0].y, 30.0f);
-            float shade = std::min(1.0f, density / 12.0f); 
+            float shade = 0.0f;//std::min(1.0f, density / 12.0f); 
 
             // Combat Pass (Red segments)
             float combatGain = 0.0f;
@@ -150,7 +94,7 @@ public:
                     auto victims = engine.getNearbyOrganisms(spike.x, spike.y, 10.0f);
                     for (auto* victim : victims) {
                         if (victim->id == org->id) continue;
-                        float damage = 60.0f * dt;
+                        float damage = config.carnivoreDamagePerSec * dt;
                         std::lock_guard<std::mutex> lock(victim->orgMutex); // Thread-safe bite
                         victim->energy -= damage;
                         combatGain += damage * 0.75f; 
@@ -242,19 +186,21 @@ public:
 
     void spawnSimpleGreen(float x, float y) {
         Genome greenDNA;
+        greenDNA.initializeBaseBrain(); // <-- Add this
         greenDNA.morphology.push_back({ColorType::GREEN, 0, -1, 5.0f, 0.0f, false, -1, 0.0f});
         population.push_back(std::make_unique<Organism>(nextOrgId++, greenDNA, config.startingEnergy, x, y));
     }
 
     void spawnWorm(float x, float y) {
         Genome wormDNA;
-        wormDNA.morphology.push_back({ColorType::YELLOW, 0, -1, 4.0f, 0.0f, true, 0, 0.0f});
-        wormDNA.morphology.push_back({ColorType::YELLOW, 1, -1, 4.0f, 0.0f, true, 1, 0.0f});
-        wormDNA.morphology.push_back({ColorType::YELLOW, 2, -1, 4.0f, 0.0f, true, 2, 0.0f});
-
-        wormDNA.neurons.push_back({0, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
-        wormDNA.neurons.push_back({1, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
-        wormDNA.neurons.push_back({2, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
+        wormDNA.initializeBaseBrain();  // <-- Add this
+        
+        // Use existing motor IDs generated by the baseline brain
+        int m1 = wormDNA.neurons.size() > 0 ? wormDNA.neurons.back().id : 0; // fallback if empty
+        
+        wormDNA.morphology.push_back({ColorType::YELLOW, 0, -1, 4.0f, 0.0f, true, m1, 0.0f});
+        wormDNA.morphology.push_back({ColorType::YELLOW, 1, -1, 4.0f, 0.0f, true, m1, 0.0f});
+        wormDNA.morphology.push_back({ColorType::YELLOW, 2, -1, 4.0f, 0.0f, true, m1, 0.0f});
 
         population.push_back(std::make_unique<Organism>(nextOrgId++, wormDNA, config.startingEnergy, x, y));
     }

@@ -6,13 +6,23 @@
 #include <algorithm>
 
 void SNNBrain::tick(float dt) {
-    // 1. Gather all incoming synaptic currents based on last tick's spikes
+    localTime += dt;
+    
+    // 1. Process spikes currently in transit
     std::vector<float> incomingCurrents(neurons.size(), 0.0f);
     
-    for (const auto& syn : synapses) {
+    for (auto& syn : synapses) {
+        // If the source fired last tick, inject a new spike into the axon
         if (neurons[syn.source_idx].spikedThisTick) {
+            syn.spikeDeliveryTimes.push(localTime + syn.delay);
+        }
+
+        // Process any spikes that have physically arrived at the dendrite
+        while (!syn.spikeDeliveryTimes.empty() && localTime >= syn.spikeDeliveryTimes.front()) {
+            syn.spikeDeliveryTimes.pop();
+            
             float current = syn.weight;
-            // Dale's principle: Source neuron polarity dictates the sign of the current
+            // Dale's principle
             if (neurons[syn.source_idx].polarity == NeuronPolarity::INHIBITORY) {
                 current = -current; 
             }
@@ -23,29 +33,28 @@ void SNNBrain::tick(float dt) {
     // 2. Integrate currents, apply leaks, and evaluate spikes
     for (size_t i = 0; i < neurons.size(); ++i) {
         LIFNeuron& n = neurons[i];
-        n.spikedThisTick = false; // Reset spike state for this new tick
+        n.spikedThisTick = false; 
 
         if (n.refractoryTimer > 0.0f) {
             n.refractoryTimer -= dt;
-            continue; // Neuron is resting, ignore inputs
+            continue; 
         }
 
-        // Apply Leak (Decay towards rest potential)
+        // Apply Leak
         float leakAmount = (n.restPotential - n.membranePotential) * n.leakRate * dt;
         n.membranePotential += leakAmount;
 
-        // Apply synaptic current and external sensory stimulus
+        // Apply arrived synaptic currents and external stimuli
         n.membranePotential += incomingCurrents[i];
         n.membranePotential += n.externalStimulus * dt; 
         
-        // Clear stimulus after consumption
         n.externalStimulus = 0.0f;
 
-        // Check for Action Potential (Spike)
+        // Action Potential 
         if (n.membranePotential >= n.threshold) {
             n.spikedThisTick = true;
-            n.membranePotential = n.restPotential; // Reset
-            n.refractoryTimer = 0.01f;             // Hardcoded absolute refractory period
+            n.membranePotential = n.restPotential; 
+            n.refractoryTimer = 0.01f;             
         }
     }
 }

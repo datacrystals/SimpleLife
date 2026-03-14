@@ -7,6 +7,7 @@
 #pragma once
 #include <vector>
 #include <cstdint>
+#include <queue>
 
 enum class NeuronRole { SENSORY, HIDDEN, MOTOR };
 enum class NeuronPolarity { EXCITATORY, INHIBITORY }; // Excitatory adds to potential, Inhibitory subtracts
@@ -34,6 +35,8 @@ struct Synapse {
     int source_idx; // Index in the neurons vector
     int target_idx; 
     float weight;   // Strength of the connection (Absolute value. Polarity determines sign during integration)
+    float delay;
+    std::queue<double> spikeDeliveryTimes; // FIFO queue for traveling spikes
 };
 
 class SNNBrain {
@@ -44,6 +47,8 @@ public:
     // Pointers/indices to quickly access IO nodes without searching the graph every tick
     std::vector<int> sensoryIndices;
     std::vector<int> motorIndices;
+
+    double localTime = 0.0f;
 
     /**
      * @brief Steps the neural network forward in time.
