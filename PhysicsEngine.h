@@ -39,5 +39,7 @@ public:
      * @brief Resolves overlap between points using a spatial hash grid for performance.
      */
     void resolveGlobalCollisions(const std::vector<PhysicsPoint*>& allPoints, float collisionRadius, float repulsionStrength, float dt);
+
+    void updateBounds(float w, float h);
 };
  

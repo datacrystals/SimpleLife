@@ -10,10 +10,12 @@
 #include <memory>
 #include <mutex>
 #include <algorithm>
+#include <execution>
+#include <mutex>
 #include <cmath> 
 
 class World {
-private:
+public:
     SimConfig config;
     PhysicsEngine engine; // Namespace dropped!
     int nextOrgId = 1;
@@ -93,12 +95,11 @@ public:
         float dt = config.physicsDt * config.timeScale;
         worldTime += dt; 
         
-        // Temporary vector to hold babies so we don't invalidate iterators
         std::vector<std::unique_ptr<Organism>> babies;
+        std::mutex babyMutex; 
 
-        // 1. Biological Updates & Reproduction
-        for (auto& org : population) {
-            // Provide alternating sine wave sensory data to simulate a central pattern generator
+        // 1. Biological Updates & Reproduction (MULTI-THREADED)
+        std::for_each(std::execution::par, population.begin(), population.end(), [&](auto& org) {
             std::vector<float> sensors = { 
                 std::max(0.0f, (float)std::sin(worldTime * 5.0f) * 2.0f),  
                 std::max(0.0f, (float)-std::sin(worldTime * 5.0f) * 2.0f)  
@@ -107,59 +108,104 @@ public:
             
             org->updateBiology(dt, config);
 
-            // Reproduction Logic
             if (org->isAlive && 
                 org->energy >= config.reproductionEnergyThreshold && 
-                org->reproCooldown <= 0.0f &&
-                (population.size() + babies.size()) < (size_t)config.maxPopulation) 
+                org->reproCooldown <= 0.0f) 
             {
-                // Pay the energy cost
                 org->energy -= config.reproductionEnergyCost;
                 org->reproCooldown = config.reproductionCooldown;
     
-                // Clone the genome
                 Genome childDNA = org->dna; 
-
                 childDNA.mutate(config);
     
-                // Spawn the baby slightly offset from the parent
                 float childX = org->points[0].x + 10.0f;
                 float childY = org->points[0].y + 10.0f;
                 
-                babies.push_back(std::make_unique<Organism>(
-                    nextOrgId++, 
-                    childDNA, 
-                    config.startingEnergy, 
-                    childX, 
-                    childY
-                ));
+                std::lock_guard<std::mutex> lock(babyMutex);
+                if ((population.size() + babies.size()) < (size_t)config.maxPopulation) {
+                    babies.push_back(std::make_unique<Organism>(
+                        nextOrgId++, 
+                        childDNA, 
+                        config.startingEnergy, 
+                        childX, 
+                        childY
+                    ));
+                } else {
+                    org->energy += config.reproductionEnergyCost;
+                    org->reproCooldown = 0.0f; 
+                }
             }
-        }
+        });
 
-        // 2. Pure Physics Updates
-        std::vector<PhysicsPoint*> allPoints;
-
-        for (auto& org : population) {
+        // 2. Pure Physics Updates - Integration & Constraints (MULTI-THREADED)
+        std::for_each(std::execution::par, population.begin(), population.end(), [&](auto& org) {
             engine.step(org->points, org->springs, dt);
-            
-            // Gather points for the spatial grid and assign IDs
+        });
+
+        // 2.5 Gather points for the spatial grid (MULTI-THREADED & LOCK-FREE)
+        size_t totalPoints = 0;
+        for (const auto& org : population) totalPoints += org->points.size(); 
+        
+        std::vector<PhysicsPoint*> allPoints(totalPoints);
+        std::atomic<size_t> pointIdx{0};
+
+        std::for_each(std::execution::par, population.begin(), population.end(), [&](auto& org) {
+            // Atomically reserve a block of indices for this thread's points
+            size_t localIdx = pointIdx.fetch_add(org->points.size());
             for (auto& pt : org->points) {
                 pt.parentOrgId = org->id; 
-                allPoints.push_back(&pt);
+                allPoints[localIdx++] = &pt;
             }
-        }
+        });
 
-        // 2.5 Resolve overlaps globally
+        // 2.6 Resolve overlaps globally (NOW FULLY MULTI-THREADED INTERNALLY)
         engine.resolveGlobalCollisions(allPoints, 2.0f, 50.0f, dt);
 
-        // 3. Introduce Babies to the World
+        // 3. Introduce Babies to the World (SEQUENTIAL - modifying the primary vector)
         for (auto& baby : babies) {
             population.push_back(std::move(baby));
         }
 
-        // 4. Cleanup Dead Bodies
+        // 4. Cleanup Dead Bodies (SEQUENTIAL - modifying the primary vector)
         population.erase(std::remove_if(population.begin(), population.end(), [](const std::unique_ptr<Organism>& org) {
             return org->markedForDeletion || (!org->isAlive && org->energy < -50.0f);
         }), population.end());
     }
+
+
+
+
+
+    void clearWorld() {
+        population.clear();
+    }
+
+    void spawnSimpleGreen(float x, float y) {
+        Genome greenDNA;
+        // Just one green node
+        greenDNA.morphology.push_back({ColorType::GREEN, 0, -1, 5.0f, 0.0f, false, -1, 0.0f});
+        
+        population.push_back(std::make_unique<Organism>(nextOrgId++, greenDNA, config.startingEnergy, x, y));
+    }
+
+    void spawnWorm(float x, float y) {
+        Genome wormDNA;
+        // A simple 3-segment squiggly worm
+        wormDNA.morphology.push_back({ColorType::YELLOW, 0, -1, 4.0f, 0.0f, true, 0, 0.0f});
+        wormDNA.morphology.push_back({ColorType::YELLOW, 1, -1, 4.0f, 0.0f, true, 1, 0.0f});
+        wormDNA.morphology.push_back({ColorType::YELLOW, 2, -1, 4.0f, 0.0f, true, 2, 0.0f});
+
+        // Basic brain to make it wiggle
+        wormDNA.neurons.push_back({0, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
+        wormDNA.neurons.push_back({1, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
+        wormDNA.neurons.push_back({2, NeuronRole::MOTOR, NeuronPolarity::EXCITATORY, 1.0f, 0.1f, 0.0f});
+
+        population.push_back(std::make_unique<Organism>(nextOrgId++, wormDNA, config.startingEnergy, x, y));
+    }
+
+
+
+
 };
+
+

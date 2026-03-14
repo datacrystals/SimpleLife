@@ -143,7 +143,10 @@ int main() {
             ImGui::SliderFloat("Segment Cost", &cfg.segmentCost, 0.0f, 0.1f, "%.3f");
             ImGui::SliderFloat("World X", &cfg.worldWidth, 50.0f, 1000.0f);
             ImGui::SliderFloat("World Y", &cfg.worldHeight, 50.0f, 1000.0f);
+            world.engine.updateBounds(cfg.worldWidth, cfg.worldHeight);
             ImGui::SliderFloat("Friction (Drag)", &cfg.friction, 0.8f, 1.0f);
+
+            ImGui::SliderInt("Max Population", &cfg.maxPopulation, 10, 10000);
         }
 
         if (ImGui::CollapsingHeader("Evolution & Mutation Limits")) {
@@ -176,6 +179,30 @@ int main() {
             ImGui::PopStyleColor();
             ImGui::SliderFloat("Flex Cost", &cfg.movementCost, 0.0001f, 0.05f, "%.4f");
         }
+
+
+        // --- Spawning & Clearing Controls ---
+        ImGui::SeparatorText("World Controls");
+                
+        if (ImGui::Button("Clear World", ImVec2(100.0f, 30.0f))) {
+            world.clearWorld();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Spawn Eden", ImVec2(100.0f, 30.0f))) {
+            world.initializeEden();
+        }
+
+        if (ImGui::Button("Add Green Blob", ImVec2(120.0f, 30.0f))) {
+            // Spawn in the center of the camera
+            world.spawnSimpleGreen(camX, camY);
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Add Worm", ImVec2(120.0f, 30.0f))) {
+            world.spawnWorm(camX, camY);
+        }
+        // ------------------------------------
 
         ImGui::End();
 
